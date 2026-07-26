@@ -15,8 +15,9 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ============================================================================
@@ -1872,4 +1873,31 @@ model CustomerCrmRelations {
 
   @@index([healthTier])
   @@index([journeyStage])
+}
+
+
+// ============================================================================
+//  WAITLIST — sign-up flow puts users here; admin approves to create account
+// ============================================================================
+
+model WaitlistEntry {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  fullName        String
+  phone           String?
+  passwordHash    String   // pre-hashed at submission; used when admin approves
+  requestedRole   String   @default("CUSTOMER") // CUSTOMER | WORKER | FIELD_MANAGER | SALES_AGENT
+  status          String   @default("PENDING") // PENDING | APPROVED | REJECTED
+  notes           String?  // admin notes
+  reviewedBy      String?  // admin user id
+  reviewedAt      DateTime?
+  rejectionReason String?
+  source          String   @default("WEB") // WEB | INVITE | IMPORT
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([requestedRole])
 }

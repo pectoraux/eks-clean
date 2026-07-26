@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { subscribe, getSocket } from "@/lib/realtime/client";
+import { subscribe, getSocket, isRealtimeEnabled } from "@/lib/realtime/client";
 
 interface LiveEvent {
   id: string;
@@ -16,8 +16,10 @@ export function RealtimeFeed() {
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const idRef = useRef(0);
+  const realtimeEnabled = isRealtimeEnabled();
 
   useEffect(() => {
+    if (!realtimeEnabled) return;
     const s = getSocket();
     const onConn = () => setConnected(true);
     const onDisc = () => setConnected(false);
@@ -65,7 +67,14 @@ export function RealtimeFeed() {
       </CardHeader>
       <CardContent className="p-0">
         <div className="max-h-72 overflow-y-auto">
-          {events.length === 0 && (
+          {!realtimeEnabled && (
+            <div className="p-4 text-xs text-muted-foreground text-center">
+              Realtime feed runs on the socket.io mini-service (not available on this deployment).
+              All other app functionality works the same — bookings, dispatch, payments, etc. just
+              won't push live updates without a page refresh.
+            </div>
+          )}
+          {realtimeEnabled && events.length === 0 && (
             <div className="p-4 text-xs text-muted-foreground text-center">
               No live events yet. Try creating a booking or transitioning its status.
             </div>

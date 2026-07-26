@@ -15,7 +15,11 @@ import { consume, LIMITS } from "@/lib/ratelimit";
 import { z } from "zod";
 
 const schema = z.object({
-  email: z.string().email(),
+  // Allow non-standard emails like "user@gmail" (no TLD) for backward compat
+  email: z.string().min(3).max(254).refine(
+    (v) => /^[^\s@]+@[^\s@]+$/.test(v),
+    { message: "Invalid email address" },
+  ),
   password: z.string().min(1),
 });
 

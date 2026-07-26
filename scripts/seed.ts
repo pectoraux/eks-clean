@@ -32,6 +32,43 @@ async function main() {
     },
   });
 
+  // -- Non-demo admin (real account for ekontetevi@gmail)
+  const realAdmin = await db.user.create({
+    data: {
+      email: "ekontetevi@gmail",
+      passwordHash: hashPassword("Payswap123456"),
+      fullName: "Ekonte Tevi",
+      role: "ADMIN",
+      status: "ACTIVE",
+    },
+  });
+  console.log(`   Created non-demo admin: ekontetevi@gmail (id: ${realAdmin.id})`);
+
+  // -- A few sample waitlist entries (so the admin UI has something to show)
+  const waitlistEmails = [
+    ["Kojo Applicant", "kojo.applicant@example.com", "CUSTOMER", "+233241111222"],
+    ["Akua Worker", "akua.worker@example.com", "WORKER", "+233243333444"],
+    ["Yaa Sales", "yaa.sales@example.com", "SALES_AGENT", "+233245555666"],
+    ["Kwame Manager", "kwame.manager@example.com", "FIELD_MANAGER", "+233247777888"],
+    ["Ama Rejected", "ama.rejected@example.com", "CUSTOMER", "+233249990000"],
+  ];
+  for (const [name, email, role, phone] of waitlistEmails) {
+    const status = email.startsWith("ama.rejected") ? "REJECTED" : "PENDING";
+    await db.waitlistEntry.create({
+      data: {
+        email,
+        fullName: name,
+        phone,
+        passwordHash: hashPassword("EksClean123!"),
+        requestedRole: role,
+        status,
+        ...(status === "REJECTED" ? { rejectionReason: "Duplicate application", reviewedBy: admin.id, reviewedAt: new Date() } : {}),
+        source: "WEB",
+      },
+    });
+  }
+  console.log(`   Created ${waitlistEmails.length} waitlist entries`);
+
   const fm1User = await db.user.create({
     data: {
       email: "fm1@eksclean.example",
@@ -467,11 +504,14 @@ async function main() {
   console.log(`   Domain Events: ${await db.domainEvent.count()}`);
   console.log("");
   console.log("Login accounts:");
-  console.log("  Admin:    admin@eksclean.example / EksClean123!");
-  console.log("  FM:       fm1@eksclean.example / EksClean123!");
-  console.log("  Sales:    sales1@eksclean.example / EksClean123!");
-  console.log("  Customer: adwoa@example.com / EksClean123!");
-  console.log("  Worker:   samuel.w@eksclean.example / EksClean123!");
+  console.log("  Real admin:    ekontetevi@gmail / Payswap123456  (non-demo, can approve waitlist)");
+  console.log("  Demo admin:    admin@eksclean.example / EksClean123!");
+  console.log("  Demo FM:       fm1@eksclean.example / EksClean123!");
+  console.log("  Demo Sales:    sales1@eksclean.example / EksClean123!");
+  console.log("  Demo Customer: adwoa@example.com / EksClean123!");
+  console.log("  Demo Worker:   samuel.w@eksclean.example / EksClean123!");
+  console.log("");
+  console.log(`Waitlist: ${await db.waitlistEntry.count()} entries (5 seeded: 4 PENDING + 1 REJECTED)`);
 }
 
 main()

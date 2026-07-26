@@ -12,7 +12,9 @@
     "db:migrate": "prisma migrate dev",
     "db:reset": "prisma migrate reset",
     "seed": "bun run scripts/seed.ts",
-    "realtime": "cd mini-services/realtime && bun run dev"
+    "realtime": "cd mini-services/realtime && bun run dev",
+    "postinstall": "prisma generate",
+    "vercel-build": "prisma generate && next build"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

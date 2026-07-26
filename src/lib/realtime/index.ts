@@ -9,7 +9,7 @@
  * ============================================================================
  */
 
-const REALTIME_URL = process.env.REALTIME_INTERNAL_URL || "http://127.0.0.1:3001";
+const REALTIME_URL = process.env.REALTIME_INTERNAL_URL || "http://127.0.0.1:3002";
 
 export async function broadcast(channel: string, event: string, payload: unknown): Promise<void> {
   try {

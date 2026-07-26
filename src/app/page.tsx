@@ -150,14 +150,17 @@ function Landing({ onAuthed }: { onAuthed: () => void }) {
           <Feature title="Enterprise B2B + B2C" body="Per-customer SLAs, milestone tracking, billing schedules, contract performance metrics — alongside consumer subscriptions." />
         </div>
         <div className="rounded-lg border bg-muted/30 p-4 text-sm">
-          <div className="font-medium mb-1">Demo accounts (password: <code>EksClean123!</code>)</div>
+          <div className="font-medium mb-1">Quick login (demo accounts)</div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-            <div><code>admin@eksclean.example</code> — full access</div>
+            <div><code>ekontetevi@gmail</code> — <strong>real admin</strong> (password: <code>Payswap123456</code>)</div>
+            <div><code>admin@eksclean.example</code> — demo admin (<code>EksClean123!</code>)</div>
             <div><code>fm1@eksclean.example</code> — field manager</div>
             <div><code>sales1@eksclean.example</code> — sales agent</div>
             <div><code>adwoa@example.com</code> — customer</div>
             <div><code>samuel.w@eksclean.example</code> — worker</div>
-            <div><code>kofi@example.com</code> — customer</div>
+          </div>
+          <div className="mt-2 text-xs text-muted-foreground">
+            Sign-up is waitlist-based: requests go to a queue, the admin approves each one before an account is created.
           </div>
         </div>
       </div>
