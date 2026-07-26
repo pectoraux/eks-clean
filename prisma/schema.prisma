@@ -2467,6 +2467,11 @@ model Organization {
   pricingRules    PricingRule[]
   properties      Property[]
   workflows       WorkflowDefinitionV2[]
+  // Milestone 4
+  enterprises     Enterprise[]
+  workOrders      WorkOrder[]
+  assets          Asset[]
+  rules           Rule[]
 }
 
 model Branch {
@@ -2996,3 +3001,487 @@ model PricingQuote {
   @@index([customerId, createdAt])
   @@index([bookingId])
 }
+
+// ============================================================================
+//  MILESTONE 4 — ENTERPRISE OPERATIONS LAYER
+//  1. Enterprise Accounts (Enterprise → Departments → Cost Centers → Budgets)
+//  2. Work Orders (generic work engine — cleaning is one type)
+//  3. Asset Registry (buildings, equipment, vehicles with maintenance history)
+//  4. Rules Engine (configurable IF/THEN rules — no code changes for ops teams)
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+//  ENTERPRISE ACCOUNTS
+//  Enterprise → Departments → Cost Centers → Budget Owners → Approvers
+// ----------------------------------------------------------------------------
+
+model Enterprise {
+  id              String   @id @default(cuid())
+  organizationId  String
+  name            String
+  legalName       String?
+  taxId           String?
+  billingEmail    String?
+  billingPhone    String?
+  address         String?
+  industry        String?
+  size            String   @default("MID") // SMALL | MID | LARGE | ENTERPRISE
+  status          String   @default("ACTIVE") // ACTIVE | SUSPENDED | TERMINATED
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  departments     Department[]
+  costCenters     CostCenter[]
+  purchaseOrders  EnterprisePurchaseOrder[]
+  approvers       EnterpriseApprover[]
+  customerLinks   CustomerEnterpriseLink[]
+
+  @@index([organizationId, status])
+}
+
+model Department {
+  id              String   @id @default(cuid())
+  enterpriseId    String
+  parentDepartmentId String? // for nested departments
+  name            String
+  code            String
+  description     String?
+  headUserId      String?  // user id of department head
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  enterprise      Enterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+  parent          Department? @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id])
+  children        Department[] @relation("DepartmentHierarchy")
+  costCenters     CostCenter[]
+
+  @@unique([enterpriseId, code])
+  @@index([enterpriseId, parentDepartmentId])
+}
+
+model CostCenter {
+  id              String   @id @default(cuid())
+  enterpriseId    String
+  departmentId    String?
+  code            String
+  name            String
+  description     String?
+  budgetAnnualMinor Int    @default(0)
+  spentYtdMinor   Int      @default(0)
+  currency        String   @default("GHS")
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  enterprise      Enterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+  department      Department? @relation(fields: [departmentId], references: [id])
+  budgetOwners    BudgetOwner[]
+  purchaseOrders  EnterprisePurchaseOrder[]
+
+  @@unique([enterpriseId, code])
+}
+
+model BudgetOwner {
+  id              String   @id @default(cuid())
+  costCenterId    String
+  userId          String   // user id of the budget owner
+  allocationMinor Int      @default(0)
+  spentMinor      Int      @default(0)
+  approvalLimitMinor Int   @default(0) // can approve POs up to this amount
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  costCenter      CostCenter @relation(fields: [costCenterId], references: [id], onDelete: Cascade)
+
+  @@index([costCenterId, status])
+}
+
+model EnterpriseApprover {
+  id              String   @id @default(cuid())
+  enterpriseId    String
+  userId          String
+  approvalLevel   Int      @default(1) // 1 = first-level, 2 = second-level, etc.
+  maxApprovalMinor Int     @default(0) // 0 = unlimited
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  enterprise      Enterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+
+  @@unique([enterpriseId, userId])
+}
+
+model EnterprisePurchaseOrder {
+  id              String   @id @default(cuid())
+  enterpriseId    String
+  costCenterId    String?
+  code            String   @unique
+  title           String
+  description     String?
+  status          String   @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | REJECTED | FULFILLED | CANCELLED
+  totalMinor      Int      @default(0)
+  currency        String   @default("GHS")
+  requestedBy     String?  // user id
+  requestedAt     DateTime @default(now())
+  approvedBy      String?  // user id
+  approvedAt      DateTime?
+  rejectionReason String?
+  itemsJson       String   // [{ description, quantity, unitPriceMinor, totalMinor }]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  enterprise      Enterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+  costCenter      CostCenter? @relation(fields: [costCenterId], references: [id])
+
+  @@index([enterpriseId, status])
+  @@index([costCenterId])
+}
+
+model CustomerEnterpriseLink {
+  id              String   @id @default(cuid())
+  customerId      String
+  enterpriseId    String
+  relationship    String   @default("EMPLOYEE") // EMPLOYEE | CONTRACTOR | DEPARTMENT
+  departmentId    String?
+  costCenterId    String?
+  createdAt       DateTime @default(now())
+
+  enterprise      Enterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, enterpriseId])
+}
+
+// ----------------------------------------------------------------------------
+//  WORK ORDERS
+//  Generic work engine — cleaning, maintenance, repairs, inspections all
+//  become work order types. Cleaning bookings can be linked to work orders.
+// ----------------------------------------------------------------------------
+
+model WorkOrder {
+  id              String   @id @default(cuid())
+  organizationId  String
+  code            String   @unique
+  title           String
+  description     String?
+  workOrderType   String   @default("CLEANING") // CLEANING | MAINTENANCE | REPAIR | INSPECTION | INSTALLATION | OTHER
+  status          String   @default("OPEN") // OPEN | ASSIGNED | IN_PROGRESS | ON_HOLD | COMPLETED | CANCELLED | FAILED
+  priority        String   @default("NORMAL") // LOW | NORMAL | HIGH | URGENT | CRITICAL
+  // Links
+  customerId      String?
+  propertyId      String?
+  bookingId       String?
+  enterpriseId    String?
+  costCenterId    String?
+  assetId         String?
+  workflowV2Id    String?  // link to configurable workflow
+  // Assignment
+  assignedWorkerIds String? // comma-separated worker ids
+  assignedManagerId String?
+  // Scheduling
+  scheduledStart  DateTime?
+  scheduledEnd    DateTime?
+  actualStart     DateTime?
+  actualEnd       DateTime?
+  // Financials
+  estimatedCostMinor Int   @default(0)
+  actualCostMinor Int      @default(0)
+  invoiceId       String?
+  currency        String   @default("GHS")
+  // Metadata
+  notes           String?
+  tags            String[] @default([])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tasks           WorkOrderTask[]
+  inspections     WorkOrderInspection[]
+  photos          WorkOrderPhoto[]
+  assets          WorkOrderAssetLink[]
+  signOffs        WorkOrderSignOff[]
+  statusHistory   WorkOrderStatusHistory[]
+
+  @@index([organizationId, status])
+  @@index([workOrderType, status])
+  @@index([customerId])
+  @@index([assetId])
+}
+
+model WorkOrderTask {
+  id              String   @id @default(cuid())
+  workOrderId     String
+  order           Int
+  title           String
+  description     String?
+  status          String   @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | SKIPPED | FAILED
+  assignedWorkerId String?
+  estimatedDurationMin Int?
+  actualDurationMin Int?
+  requiresPhoto   Boolean  @default(false)
+  checklistJson   String?  // [{ item, checked }]
+  completedAt     DateTime?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@index([workOrderId, order])
+}
+
+model WorkOrderInspection {
+  id              String   @id @default(cuid())
+  workOrderId     String
+  inspectedBy     String?  // user id
+  inspectedAt     DateTime @default(now())
+  inspectionType  String   @default("QUALITY") // QUALITY | SAFETY | COMPLETION | COMPLIANCE
+  score           Float?   // 0..100
+  passed          Boolean  @default(true)
+  findings        String?
+  deficienciesJson String? // [{ area, severity, description, actionRequired }]
+  photoUrls       String?  // JSON array
+  nextAction      String?  // PASS | REWORK | ESCALATE | FAIL
+  createdAt       DateTime @default(now())
+
+  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@index([workOrderId, inspectedAt])
+}
+
+model WorkOrderPhoto {
+  id              String   @id @default(cuid())
+  workOrderId     String
+  taskId          String?
+  url             String
+  caption         String?
+  photoType       String   @default("GENERAL") // GENERAL | BEFORE | AFTER | DAMAGE | DEFICIENCY | COMPLETION
+  takenBy         String?  // user id
+  takenAt         DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@index([workOrderId, photoType])
+}
+
+model WorkOrderAssetLink {
+  id              String   @id @default(cuid())
+  workOrderId     String
+  assetId         String
+  relationship    String   @default("SERVICED") // SERVICED | INSPECTED | REPAIRED | INSTALLED | REMOVED
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  asset           Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@unique([workOrderId, assetId])
+}
+
+model WorkOrderSignOff {
+  id              String   @id @default(cuid())
+  workOrderId     String
+  signedBy        String   // user id
+  signerRole      String   // WORKER | MANAGER | CUSTOMER | INSPECTOR
+  signedAt        DateTime @default(now())
+  signature       String?  // base64 or hash
+  comments        String?
+  approved        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@index([workOrderId, signerRole])
+}
+
+model WorkOrderStatusHistory {
+  id              String   @id @default(cuid())
+  workOrderId     String
+  fromStatus      String?
+  toStatus        String
+  changedBy       String?  // user id
+  changedByType   String?  // SYSTEM | WORKER | MANAGER | CUSTOMER
+  reason          String?
+  createdAt       DateTime @default(now())
+
+  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+
+  @@index([workOrderId, createdAt])
+}
+
+// ----------------------------------------------------------------------------
+//  ASSET REGISTRY
+//  Buildings, floors, rooms, equipment, HVAC, furniture, vehicles — everything
+//  with maintenance history. Assets can be nested (building → floor → room → equipment).
+// ----------------------------------------------------------------------------
+
+model Asset {
+  id              String   @id @default(cuid())
+  organizationId  String
+  parentAssetId   String?  // for nesting: building → floor → room → equipment
+  code            String
+  name            String
+  assetType       String   // BUILDING | FLOOR | ROOM | EQUIPMENT | HVAC | FURNITURE | VEHICLE | APPLIANCE | FIXTURE | OTHER
+  description     String?
+  // Location
+  propertyId      String?
+  location        String?
+  latitude        Float?
+  longitude       Float?
+  // Identification
+  serialNumber    String?
+  manufacturer    String?
+  model           String?
+  yearAcquired    Int?
+  purchaseCostMinor Int?
+  currentValueMinor Int?
+  // Status
+  status          String   @default("ACTIVE") // ACTIVE | INACTIVE | UNDER_MAINTENANCE | RETIRED | DISPOSED
+  condition       String   @default("GOOD") // EXCELLENT | GOOD | FAIR | POOR | BROKEN
+  // Maintenance
+  lastMaintenanceAt DateTime?
+  nextMaintenanceAt DateTime?
+  maintenanceIntervalDays Int? // e.g. 90 for quarterly
+  warrantyExpiry  DateTime?
+  // Metadata
+  metadataJson    String?  // free-form attributes (capacity, voltage, etc.)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  parent          Asset?   @relation("AssetHierarchy", fields: [parentAssetId], references: [id])
+  children        Asset[]  @relation("AssetHierarchy")
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  maintenanceRecords AssetMaintenance[]
+  workOrderLinks  WorkOrderAssetLink[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, assetType, status])
+  @@index([parentAssetId])
+  @@index([propertyId])
+}
+
+model AssetMaintenance {
+  id              String   @id @default(cuid())
+  assetId         String
+  maintenanceType String   @default("PREVENTIVE") // PREVENTIVE | CORRECTIVE | EMERGENCY | INSPECTION | CALIBRATION
+  scheduledAt     DateTime?
+  completedAt     DateTime?
+  performedBy     String?  // user id
+  description     String?
+  costMinor       Int      @default(0)
+  status          String   @default("SCHEDULED") // SCHEDULED | IN_PROGRESS | COMPLETED | CANCELLED
+  findings        String?
+  partsReplaced   String?  // JSON array
+  nextMaintenanceAt DateTime?
+  workOrderId     String?
+  createdAt       DateTime @default(now())
+
+  asset           Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  @@index([assetId, status])
+  @@index([scheduledAt])
+}
+
+// ----------------------------------------------------------------------------
+//  RULES ENGINE
+//  Configurable IF/THEN rules — operations teams change behavior without deployments.
+//
+//  Rule structure:
+//    Rule (name, scope, trigger, priority, isActive)
+//      → RuleCondition (field, operator, value) — all must match (AND logic)
+//      → RuleAction (actionType, config) — executed in order
+//      → RuleExecution (log of every time this rule fired)
+//
+//  Example: "If customer rated below 3 → create QA inspection → notify manager → offer discount"
+// ============================================================================
+
+model Rule {
+  id              String   @id @default(cuid())
+  organizationId  String
+  name            String
+  description     String?
+  // When does this rule trigger?
+  triggerEvent    String   // e.g. "booking.rated", "work_order.completed", "payment.failed"
+  triggerType     String   @default("EVENT") // EVENT | SCHEDULED | MANUAL
+  // Scope
+  scope           String   @default("ORGANIZATION") // ORGANIZATION | ENTERPRISE | DEPARTMENT
+  scopeId         String?  // org/enterprise/dept id
+  // Priority + activation
+  priority        Int      @default(100) // lower = higher priority
+  isActive        Boolean  @default(true)
+  // Execution control
+  maxExecutionsPerDay Int  @default(0) // 0 = unlimited
+  cooldownMinutes Int      @default(0) // min time between executions for same entity
+  // Metadata
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  conditions      RuleCondition[]
+  actions         RuleAction[]
+  executions      RuleExecution[]
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, isActive, priority])
+  @@index([triggerEvent, isActive])
+}
+
+model RuleCondition {
+  id              String   @id @default(cuid())
+  ruleId          String
+  order           Int      @default(0)
+  field           String   // e.g. "rating.overall", "booking.totalMinor", "property.squareMeters"
+  operator        String   // EQ | NE | GT | GTE | LT | LTE | IN | NOT_IN | CONTAINS | STARTS_WITH | ENDS_WITH | BETWEEN
+  valueJson       String   // JSON-encoded value (string, number, array, etc.)
+  // Optional: AND/OR logic with next condition
+  logicOperator   String   @default("AND") // AND | OR
+
+  rule            Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId, order])
+}
+
+model RuleAction {
+  id              String   @id @default(cuid())
+  ruleId          String
+  order           Int      @default(0)
+  actionType      String   // CREATE_WORK_ORDER | NOTIFY | SEND_EMAIL | SEND_SMS | APPLY_DISCOUNT |
+                           // ASSIGN_WORKER | CREATE_INSPECTION | UPDATE_FIELD | TRIGGER_WEBHOOK |
+                           // START_WORKFLOW | CREATE_TASK | SET_PRIORITY | ADD_TAG
+  name            String?
+  configJson      String   // action-specific config (target, template, amount, etc.)
+  isAsync         Boolean  @default(false)
+
+  rule            Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId, order])
+}
+
+model RuleExecution {
+  id              String   @id @default(cuid())
+  ruleId          String
+  triggerEventId  String?  // AnalyticsEvent id that triggered
+  entityType      String?  // BOOKING | WORK_ORDER | CUSTOMER | etc.
+  entityId        String?
+  // Execution result
+  status          String   @default("PENDING") // PENDING | RUNNING | COMPLETED | FAILED | SKIPPED
+  conditionsMatched Boolean @default(false)
+  actionsExecutedJson String? // [{ actionId, actionType, success, result }]
+  errorMessage    String?
+  startedAt       DateTime @default(now())
+  completedAt     DateTime?
+  durationMs      Int?
+  // Metadata
+  triggeredBy     String?  // user id (for manual triggers)
+  metadataJson    String?
+
+  rule            Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  @@index([ruleId, status, startedAt])
+  @@index([entityType, entityId])
+}
+
+// Add Organization relation for Enterprise + WorkOrder + Asset + Rule
+// (these are declared above but need back-relations on Organization)

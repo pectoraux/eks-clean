@@ -118,7 +118,19 @@ export type Permission =
   // Milestone 2 — AI-Ready
   | "ai:prompts:manage"
   | "ai:runs:read"
-  | "ai:predictions:read";
+  | "ai:predictions:read"
+  // Milestone 4 — Enterprise Operations
+  | "enterprise:read"
+  | "enterprise:manage"
+  | "enterprise:approve_po"
+  | "workorders:read"
+  | "workorders:manage"
+  | "workorders:inspect"
+  | "assets:read"
+  | "assets:manage"
+  | "rules:read"
+  | "rules:manage"
+  | "rules:execute";
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   CUSTOMER: [
@@ -290,6 +302,18 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "ai:prompts:manage",
     "ai:runs:read",
     "ai:predictions:read",
+    // Milestone 4
+    "enterprise:read",
+    "enterprise:manage",
+    "enterprise:approve_po",
+    "workorders:read",
+    "workorders:manage",
+    "workorders:inspect",
+    "assets:read",
+    "assets:manage",
+    "rules:read",
+    "rules:manage",
+    "rules:execute",
   ],
 };
 
