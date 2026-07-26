@@ -38,10 +38,13 @@ model User {
   lastLoginAt     DateTime?
   failedLoginCount Int     @default(0)
   lockedUntil     DateTime?
+  // Multi-tenancy: every user belongs to an organization
+  organizationId  String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
   deletedAt       DateTime?
 
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   refreshTokens   RefreshToken[]
   auditLogs       AuditLog[]
   notifications   Notification[]
@@ -53,6 +56,7 @@ model User {
 
   @@index([role])
   @@index([status])
+  @@index([organizationId])
 }
 
 model RefreshToken {
@@ -93,6 +97,7 @@ model RolePermission {
 model Customer {
   id              String   @id @default(cuid())
   userId          String   @unique
+  organizationId  String?
   payswapCustomerId String? // Payment gateway reference (never store cards)
   preferredLanguage String? @default("en")
   marketingOptIn  Boolean  @default(true)
@@ -103,6 +108,7 @@ model Customer {
   updatedAt       DateTime @updatedAt
   deletedAt       DateTime?
 
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   addresses       Address[]
   householdProfiles HouseholdProfile[]
@@ -118,8 +124,10 @@ model Customer {
   journeyStages   CustomerJourneyStage[]
   contracts       EnterpriseContract[]
   segmentMemberships CrmSegmentMembership[]
+  properties      Property[]
 
   @@index([customerTier])
+  @@index([organizationId])
 }
 
 model Address {
@@ -187,6 +195,7 @@ model FavoriteWorker {
 model Worker {
   id                String   @id @default(cuid())
   userId            String   @unique
+  organizationId    String?
   employeeId        String?  @unique
   payswapAccountId  String?  // Connected account reference
   status            String   @default("PENDING") // PENDING | ACTIVE | SUSPENDED | TERMINATED
@@ -211,6 +220,7 @@ model Worker {
   deletedAt         DateTime?
 
   user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   skills            WorkerSkill[]
   certifications    WorkerCertification[]
   trainingRecords   TrainingRecord[]
@@ -430,9 +440,11 @@ model ServiceType {
   isActive        Boolean  @default(true)
   requiresCertification String? // comma-separated skill codes required
   configJson      String?  // free-form JSON config (no code changes to add services)
+  organizationId  String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   bookings        Booking[]
   subscriptionPlans SubscriptionPlan[]
   inventoryItems  InventoryItem[]
@@ -450,6 +462,7 @@ model ServiceType {
 model Booking {
   id              String   @id @default(cuid())
   code            String   @unique // human-friendly e.g. EKS-2026-001234
+  organizationId  String?
   customerId      String
   serviceTypeId   String
   addressId       String
@@ -477,6 +490,7 @@ model Booking {
   deletedAt       DateTime?
 
   customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   serviceType     ServiceType  @relation(fields: [serviceTypeId], references: [id])
   address         Address      @relation(fields: [addressId], references: [id])
   householdProfile HouseholdProfile? @relation(fields: [householdProfileId], references: [id])
@@ -588,6 +602,7 @@ model SubscriptionPlan {
 
 model Subscription {
   id              String   @id @default(cuid())
+  organizationId  String?
   customerId      String
   planId          String
   payswapSubscriptionId String?
@@ -604,6 +619,7 @@ model Subscription {
   deletedAt       DateTime?
 
   customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  organization    Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   plan            SubscriptionPlan @relation(fields: [planId], references: [id])
 
   @@index([customerId, status])
@@ -629,9 +645,11 @@ model InventoryItem {
   replacementRecommendation String?
   imageUrl        String?
   isActive        Boolean  @default(true)
+  organizationId  String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   serviceTypes    ServiceType[]
   warehouseStock  WarehouseStock[]
   workerStock     WorkerInventoryItem[]
@@ -1346,6 +1364,7 @@ model RecertificationSchedule {
 
 model Supplier {
   id              String   @id @default(cuid())
+  organizationId  String?
   code            String   @unique
   name            String
   contactName     String?
@@ -1360,10 +1379,12 @@ model Supplier {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   purchaseOrders  PurchaseOrder[]
   performanceRecords SupplierPerformance[]
 
   @@index([isActive])
+  @@index([organizationId])
 }
 
 model PurchaseOrder {
@@ -1501,6 +1522,7 @@ model WarehouseTransfer {
 
 model Vehicle {
   id              String   @id @default(cuid())
+  organizationId  String?
   plateNumber     String   @unique
   make            String
   model           String
@@ -1519,6 +1541,7 @@ model Vehicle {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   assignments     VehicleAssignment[]
   maintenance     VehicleMaintenance[]
   fuelLogs        FuelLog[]
@@ -1526,6 +1549,7 @@ model Vehicle {
 
   @@index([status])
   @@index([assignedWorkerId])
+  @@index([organizationId])
 }
 
 model VehicleAssignment {
@@ -1604,6 +1628,7 @@ model VehicleInspection {
 model EnterpriseContract {
   id              String   @id @default(cuid())
   contractNumber  String   @unique
+  organizationId  String?
   customerId      String
   title           String
   description     String?
@@ -1622,6 +1647,7 @@ model EnterpriseContract {
   updatedAt       DateTime @updatedAt
 
   customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   lines           ContractLine[]
   milestones      ContractMilestone[]
   billingSchedule ContractBillingSchedule[]
@@ -2389,4 +2415,584 @@ model AiWorkflowAdapter {
   createdAt       DateTime @default(now())
 
   @@index([agentType, isActive])
+}
+
+// ============================================================================
+//  MILESTONE 3 — ARCHITECTURAL FOUNDATIONS
+//  1. Multi-Tenancy (Organization → Branch → Area)
+//  2. Geographic Intelligence (Country → Region → City → District → Neighborhood → Zone → ServiceArea)
+//  3. Property Digital Twin (Property → Room → Surface → Appliance → Furniture → Photo → Timeline)
+//  4. Configurable Workflow Engine v2 (Stage → Task → Checklist → RequiredSkill → RequiredProduct → ApprovalRule → QualityGate)
+//  5. Dynamic Pricing Engine (PricingRule + PricingFactor + compute function)
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+//  MULTI-TENANCY
+//  Organization is the top-level tenant. Eks-Clean itself is one Organization.
+//  Future: other cleaning/laundry/waste/facilities companies become their own Orgs.
+// ----------------------------------------------------------------------------
+
+model Organization {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  legalName       String?
+  taxId           String?
+  billingEmail    String?
+  billingPhone    String?
+  address         String?
+  country         String?
+  currency        String   @default("GHS")
+  timezone        String   @default("Africa/Accra")
+  locale          String   @default("en")
+  status          String   @default("ACTIVE") // ACTIVE | SUSPENDED | TERMINATED
+  plan            String   @default("STARTER") // STARTER | GROWTH | ENTERPRISE
+  trialEndsAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  branches        Branch[]
+  areas           Area[]
+  users           User[]
+  customers       Customer[]
+  workers         Worker[]
+  serviceTypes    ServiceType[]
+  bookings        Booking[]
+  subscriptions   Subscription[]
+  inventoryItems  InventoryItem[]
+  vehicles        Vehicle[]
+  contracts       EnterpriseContract[]
+  suppliers       Supplier[]
+  geoZones        GeoZone[]
+  pricingRules    PricingRule[]
+  properties      Property[]
+  workflows       WorkflowDefinitionV2[]
+}
+
+model Branch {
+  id              String   @id @default(cuid())
+  organizationId  String
+  code            String
+  name            String
+  address         String?
+  phone           String?
+  managerUserId   String?  // User id of branch manager
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  areas           Area[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, status])
+}
+
+model Area {
+  id              String   @id @default(cuid())
+  organizationId  String
+  branchId        String?
+  code            String
+  name            String
+  description     String?
+  geoZoneId       String?
+  managerUserId   String?
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  branch          Branch?     @relation(fields: [branchId], references: [id])
+
+  @@unique([organizationId, code])
+  @@index([organizationId, status])
+}
+
+// ----------------------------------------------------------------------------
+//  GEOGRAPHIC INTELLIGENCE
+//  Full hierarchy: Country → Region → City → District → Neighborhood → Zone → ServiceArea
+//  Plus: TravelPolygon, CoverageRadius, TrafficModel, PricingZone, DemandScore
+// ----------------------------------------------------------------------------
+
+model GeoCountry {
+  id              String   @id @default(cuid())
+  code            String   @unique  // ISO 3166-1 alpha-2 (e.g. "GH")
+  name            String
+  currency        String   @default("GHS")
+  phoneCode       String?  // "+233"
+  timezone        String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  regions         GeoRegion[]
+}
+
+model GeoRegion {
+  id              String   @id @default(cuid())
+  countryId       String
+  code            String
+  name            String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  country         GeoCountry @relation(fields: [countryId], references: [id], onDelete: Cascade)
+  cities          GeoCity[]
+
+  @@unique([countryId, code])
+}
+
+model GeoCity {
+  id              String   @id @default(cuid())
+  regionId        String
+  code            String
+  name            String
+  latitude        Float?
+  longitude       Float?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  region          GeoRegion @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  districts       GeoDistrict[]
+
+  @@unique([regionId, code])
+}
+
+model GeoDistrict {
+  id              String   @id @default(cuid())
+  cityId          String
+  code            String
+  name            String
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  city            GeoCity @relation(fields: [cityId], references: [id], onDelete: Cascade)
+  neighborhoods   GeoNeighborhood[]
+
+  @@unique([cityId, code])
+}
+
+model GeoNeighborhood {
+  id              String   @id @default(cuid())
+  districtId      String
+  code            String
+  name            String
+  latitude        Float?
+  longitude       Float?
+  createdAt       DateTime @default(now())
+
+  district        GeoDistrict @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  zones           GeoZone[]
+
+  @@unique([districtId, code])
+}
+
+model GeoZone {
+  id              String   @id @default(cuid())
+  organizationId  String?
+  neighborhoodId  String?
+  code            String
+  name            String
+  description     String?
+  // Travel polygon as GeoJSON — array of [lat, lon] coordinates
+  polygonJson     String?  // {"type":"Polygon","coordinates":[[[lon,lat],...]]}
+  // Coverage radius in km (alternative to polygon)
+  coverageRadiusKm Float?
+  centerLatitude  Float?
+  centerLongitude Float?
+  // Traffic model: average speed (km/h) by time-of-day
+  trafficModelJson String? // {"off_peak":35,"morning_peak":18,"evening_peak":15,"night":40}
+  // Demand score 0..1 for this zone
+  demandScore     Float    @default(0.5)
+  // Pricing multiplier for this zone (e.g. 1.2 for premium areas)
+  pricingMultiplier Float  @default(1.0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  neighborhood    GeoNeighborhood? @relation(fields: [neighborhoodId], references: [id])
+  serviceAreas    GeoServiceArea[]
+
+  @@index([organizationId, isActive])
+  @@index([neighborhoodId])
+}
+
+model GeoServiceArea {
+  id              String   @id @default(cuid())
+  zoneId          String
+  code            String
+  name            String
+  // Worker assignment rules for this service area
+  defaultWorkerPool String? // comma-separated worker ids
+  estimatedTravelMin Int?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  zone            GeoZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
+
+  @@unique([zoneId, code])
+}
+
+// ----------------------------------------------------------------------------
+//  PROPERTY DIGITAL TWIN
+//  Property → Room → Surface → Appliance → Furniture → Photo → Timeline
+//  Replaces/augments the minimal HouseholdProfile
+// ----------------------------------------------------------------------------
+
+model Property {
+  id              String   @id @default(cuid())
+  organizationId  String
+  customerId      String
+  name            String   // "Main House", "Apartment B"
+  propertyType    String   @default("HOUSE") // HOUSE | APARTMENT | OFFICE | STUDIO | TOWNHOUSE | VILLA
+  addressId       String?
+  geoZoneId       String?
+  // Structural
+  bedrooms        Int      @default(1)
+  bathrooms       Int      @default(1)
+  squareMeters    Float?
+  floors          Int      @default(1)
+  yearBuilt       Int?
+  // Characteristics
+  hasPets         Boolean  @default(false)
+  petDetails      String?
+  hasChildren     Boolean  @default(false)
+  accessNotes     String?
+  parkingAvailable Boolean @default(false)
+  // Digital twin metadata
+  lastCleanedAt   DateTime?
+  nextRecommendedCleanAt DateTime?
+  cleanlinessScore Float?  // 0..100, computed from history
+  // Config
+  preferredProducts String? // comma-separated product ids
+  specialInstructions String?
+  status          String   @default("ACTIVE")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rooms           Room[]
+  appliances      Appliance[]
+  photos          PropertyPhoto[]
+  timeline        PropertyTimelineEvent[]
+  cleaningHistory PropertyCleaningRecord[]
+
+  @@index([organizationId, customerId])
+  @@index([geoZoneId])
+}
+
+model Room {
+  id              String   @id @default(cuid())
+  propertyId      String
+  name            String   // "Master Bedroom", "Kitchen"
+  roomType        String   @default("BEDROOM") // BEDROOM | BATHROOM | KITCHEN | LIVING_ROOM | DINING | OFFICE | GARAGE | BALCONY | OTHER
+  floor           Int      @default(1)
+  areaSqM         Float?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  surfaces        Surface[]
+  furniture       Furniture[]
+
+  @@index([propertyId])
+}
+
+model Surface {
+  id              String   @id @default(cuid())
+  roomId          String
+  surfaceType     String   // MARBLE | GRANITE | WOOD | LAMINATE | LEATHER | FABRIC | GLASS | TILES | ELECTRONICS | CARPET | OTHER
+  location        String?  // "Floor", "Countertop", "Wall"
+  areaSqM         Float?
+  condition       String   @default("GOOD") // EXCELLENT | GOOD | FAIR | POOR
+  lastTreatedAt   DateTime?
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+}
+
+model Furniture {
+  id              String   @id @default(cuid())
+  roomId          String
+  name            String   // "Sofa", "Dining table"
+  material        String?  // WOOD | LEATHER | FABRIC | METAL | GLASS
+  quantity        Int      @default(1)
+  condition       String   @default("GOOD")
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
+
+  @@index([roomId])
+}
+
+model Appliance {
+  id              String   @id @default(cuid())
+  propertyId      String
+  name            String   // "Refrigerator", "Washing machine"
+  brand           String?
+  model           String?
+  location        String?  // "Kitchen"
+  purchaseDate    DateTime?
+  lastServicedAt  DateTime?
+  warrantyExpiry  DateTime?
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+}
+
+model PropertyPhoto {
+  id              String   @id @default(cuid())
+  propertyId      String
+  roomId          String?
+  url             String
+  caption         String?
+  photoType       String   @default("GENERAL") // GENERAL | BEFORE | AFTER | DAMAGE | INSPECTION
+  takenAt         DateTime @default(now())
+  takenBy         String?
+  createdAt       DateTime @default(now())
+
+  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId])
+}
+
+model PropertyTimelineEvent {
+  id              String   @id @default(cuid())
+  propertyId      String
+  eventType       String   // CLEANED | CARPET_CLEANED | LAUNDRY_PICKUP | TRASH_COLLECTED | WINDOW_CLEANED | DEEP_CLEAN | INSPECTION | COMPLAINT | RATING | INVOICE | REPAIR | MAINTENANCE
+  title           String
+  description     String?
+  bookingId       String?
+  workerId        String?
+  occurredAt      DateTime @default(now())
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+
+  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, occurredAt])
+}
+
+model PropertyCleaningRecord {
+  id              String   @id @default(cuid())
+  propertyId      String
+  bookingId       String?
+  cleanedAt       DateTime
+  durationMin     Int
+  roomsCleaned    Int
+  productsUsed    String?  // JSON array of {itemId, quantity}
+  issuesFound     String?  // JSON array
+  qualityScore    Float?   // 0..100
+  notes           String?
+  createdAt       DateTime @default(now())
+
+  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  @@index([propertyId, cleanedAt])
+}
+
+// ----------------------------------------------------------------------------
+//  CONFIGURABLE WORKFLOW ENGINE v2
+//  Workflow → Stage → Task → Checklist → RequiredSkill → RequiredProduct → ApprovalRule → QualityGate
+// ----------------------------------------------------------------------------
+
+model WorkflowDefinitionV2 {
+  id              String   @id @default(cuid())
+  organizationId  String
+  key             String
+  name            String
+  description     String?
+  serviceTypeId   String?  // optional: bind to a specific service
+  entityType      String   @default("BOOKING")
+  version         Int      @default(1)
+  isActive        Boolean  @default(true)
+  estimatedDurationMin Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stages          WorkflowStage[]
+
+  @@unique([organizationId, key])
+  @@index([organizationId, isActive])
+}
+
+model WorkflowStage {
+  id              String   @id @default(cuid())
+  workflowId      String
+  order           Int
+  name            String
+  description     String?
+  stageType       String   @default("EXECUTION") // PREPARATION | EXECUTION | REVIEW | HANDOVER | POST_SERVICE
+  estimatedDurationMin Int?
+  isRequired      Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  workflow        WorkflowDefinitionV2 @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  tasks           WorkflowTask[]
+
+  @@index([workflowId, order])
+}
+
+model WorkflowTask {
+  id              String   @id @default(cuid())
+  stageId         String
+  order           Int
+  title           String
+  description     String?
+  estimatedDurationMin Int?
+  isRequired      Boolean  @default(true)
+  requiresPhoto   Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  stage           WorkflowStage  @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  checklists      WorkflowChecklist[]
+  requiredSkills  WorkflowRequiredSkill[]
+  requiredProducts WorkflowRequiredProduct[]
+  approvalRules   WorkflowApprovalRule[]
+  qualityGates    WorkflowQualityGate[]
+
+  @@index([stageId, order])
+}
+
+model WorkflowChecklist {
+  id              String   @id @default(cuid())
+  taskId          String
+  item            String
+  isRequired      Boolean  @default(true)
+  order           Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  task            WorkflowTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
+model WorkflowRequiredSkill {
+  id              String   @id @default(cuid())
+  taskId          String
+  skillCode       String
+  minLevel        Int      @default(1)
+  createdAt       DateTime @default(now())
+
+  task            WorkflowTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@unique([taskId, skillCode])
+}
+
+model WorkflowRequiredProduct {
+  id              String   @id @default(cuid())
+  taskId          String
+  itemId          String?
+  productCode     String?  // fallback if item not in inventory
+  quantity        Float    @default(1)
+  unit            String   @default("UNIT")
+  createdAt       DateTime @default(now())
+
+  task            WorkflowTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
+model WorkflowApprovalRule {
+  id              String   @id @default(cuid())
+  taskId          String
+  approverRole    String   // FIELD_MANAGER | ADMIN | CUSTOMER
+  approverUserId  String?
+  autoApproveIfScoreGte Float? // auto-approve if quality score ≥ this
+  createdAt       DateTime @default(now())
+
+  task            WorkflowTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
+model WorkflowQualityGate {
+  id              String   @id @default(cuid())
+  taskId          String
+  metric          String   // PHOTO_REQUIRED | CHECKLIST_COMPLETE | QUALITY_SCORE | CUSTOMER_SIGNOFF | DURATION_WITHIN_RANGE
+  threshold       Float?
+  failureAction   String   @default("BLOCK") // BLOCK | WARN | REWORK
+  createdAt       DateTime @default(now())
+
+  task            WorkflowTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([taskId])
+}
+
+// ----------------------------------------------------------------------------
+//  DYNAMIC PRICING ENGINE
+//  PricingRule + PricingFactor → compute dynamic quote
+// ----------------------------------------------------------------------------
+
+model PricingRule {
+  id              String   @id @default(cuid())
+  organizationId  String
+  serviceTypeId   String
+  name            String
+  description     String?
+  priority        Int      @default(100) // lower = higher priority
+  isActive        Boolean  @default(true)
+  // Base
+  basePriceMinor  Int
+  priceUnit       String   @default("PER_HOUR") // PER_HOUR | PER_JOB | PER_SQ_M | PER_KG
+  // Multipliers (all default 1.0 = no change)
+  distanceMultiplier Float  @default(1.0)  // applied per km beyond base radius
+  distanceBaseKm  Float    @default(10)   // free travel radius
+  distancePerKmMinor Int   @default(0)    // charge per km beyond base
+  urgencyMultiplier Float  @default(1.0)  // 1.5 for same-day
+  demandMultiplier Float   @default(1.0)  // dynamic based on zone demand score
+  scarcityMultiplier Float @default(1.0)  // worker scarcity
+  subscriptionDiscount Float @default(0.0) // 0.1 = 10% off for subscribers
+  promotionMultiplier Float @default(1.0) // 0.9 = 10% promo
+  holidayMultiplier Float  @default(1.0)  // 2.0 on holidays
+  nightSurchargeMinor Int  @default(0)    // flat surcharge for night jobs
+  largePropertyMultiplier Float @default(1.0) // 1.2 for >200 sqm
+  largePropertyThreshold Float @default(200) // sqm threshold
+  // Effective dates
+  validFrom       DateTime?
+  validTo         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, serviceTypeId, isActive])
+}
+
+model PricingQuote {
+  id              String   @id @default(cuid())
+  organizationId  String?
+  customerId      String?
+  serviceTypeId   String?
+  propertyId      String?
+  bookingId       String?
+  basePriceMinor  Int
+  distanceChargeMinor Int  @default(0)
+  urgencyChargeMinor Int   @default(0)
+  demandChargeMinor Int    @default(0)
+  scarcityChargeMinor Int  @default(0)
+  subscriptionDiscountMinor Int @default(0)
+  promotionDiscountMinor Int @default(0)
+  holidayChargeMinor Int   @default(0)
+  nightSurchargeMinor Int  @default(0)
+  largePropertyChargeMinor Int @default(0)
+  finalPriceMinor Int
+  currency        String   @default("GHS")
+  breakdownJson   String   // full breakdown for transparency
+  validUntil      DateTime?
+  createdAt       DateTime @default(now())
+
+  @@index([customerId, createdAt])
+  @@index([bookingId])
 }

@@ -110,8 +110,8 @@ function Header({ session }: { session: ReturnType<typeof useAuth.getState>["ses
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm">E</div>
           <div>
-            <div className="font-semibold leading-none">Eks-Clean</div>
-            <div className="text-[10px] text-muted-foreground">Household Services OS</div>
+            <div className="font-semibold leading-none">Eks-Clean <span className="text-[10px] text-muted-foreground font-normal ml-1">powered by Eks Operations Platform</span></div>
+            <div className="text-[10px] text-muted-foreground">Household Services ERP</div>
           </div>
         </div>
         {session && (
@@ -146,15 +146,20 @@ function Landing({ onAuthed }: { onAuthed: () => void }) {
             <Sparkles className="w-3 h-3" /> Production-grade ERP · 26 modules · Event-driven
           </div>
           <h1 className="text-4xl font-bold tracking-tight">Eks-Clean</h1>
+          <p className="text-sm text-primary font-medium">powered by Eks Operations Platform</p>
           <p className="text-lg text-muted-foreground max-w-2xl">
-            A complete Household Operations ERP — customers, workers, dispatch, logistics,
-            subscriptions, inventory, quality, CRM, cleaning protocols, training LMS,
-            supply chain, fleet, enterprise contracts, configurable workflows, advanced
-            analytics, and a future gig marketplace.
+            A multi-tenant Household Operations ERP — the first product built on the
+            Eks Operations Platform. Future products (Eks Laundry, Eks Waste, Eks Facilities,
+            Eks Property) will run on the same configurable workflow engine, geographic
+            intelligence, property digital twin, and dynamic pricing.
           </p>
         </div>
         <div className="grid sm:grid-cols-2 gap-3">
-          <Feature title="26 bounded contexts" body="9 new ERP modules layered on the original 17 — CRM, Protocols, LMS, SCM, Fleet, Contracts, Workflows, Analytics+, AI-ready actions." />
+          <Feature title="Multi-tenant architecture" body="Organization → Branch → Area hierarchy. Eks-Clean is one tenant. Other service companies can subscribe. Org-scoped queries throughout." />
+          <Feature title="Configurable workflow engine v2" body="Workflow → Stage → Task → Checklist → RequiredSkill → RequiredProduct → ApprovalRule → QualityGate. Adding pest control = config only." />
+          <Feature title="Property digital twin" body="Property → Room → Surface → Appliance → Furniture → Photo → Timeline. Every cleaning becomes history. AI-ready recommendations." />
+          <Feature title="Dynamic pricing engine" body="10 transparent factors: base × distance × urgency × demand × scarcity × subscription × promo × holiday × night × large-property." />
+          <Feature title="Geographic intelligence" body="Country → Region → City → District → Neighborhood → Zone → ServiceArea. Travel polygons, traffic models, demand scores, pricing zones." />
           <Feature title="Payment-gateway abstracted" body="Payswap is the only implementation. No business logic depends on it directly. Card data never touches this app." />
           <Feature title="Configurable workflow engine" body="Versioned state machines with guards, triggers, and AI-ready action adapters (LLM, forecast, classify, webhook)." />
           <Feature title="Audit-grade + RBAC" body="5 roles, 60+ permissions, JWT + refresh rotation, audit log on every state change, soft-deletes." />
