@@ -1,0 +1,408 @@
+openapi: 3.0.3
+info:
+  title: Eks-Clean API
+  version: 1.0.0
+  description: |
+    Production-grade SaaS API for household services businesses.
+    All payment operations are delegated to Payswap via the PaymentGateway abstraction.
+  contact:
+    name: Eks-Clean
+servers:
+  - url: /
+    description: Local
+  - url: https://api.eksclean.example
+    description: Production
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: {}
+    User:
+      type: object
+      properties:
+        id: { type: string }
+        email: { type: string, format: email }
+        fullName: { type: string }
+        role: { type: string, enum: [CUSTOMER, WORKER, FIELD_MANAGER, SALES_AGENT, ADMIN] }
+        status: { type: string }
+    Booking:
+      type: object
+      properties:
+        id: { type: string }
+        code: { type: string }
+        status: { type: string, enum: [draft, requested, assigned, worker_accepted, worker_en_route, arrived, in_progress, completed, rated, cancelled, disputed] }
+        scheduledStart: { type: string, format: date-time }
+        scheduledEnd: { type: string, format: date-time }
+        totalMinor: { type: integer }
+        currency: { type: string }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /api/auth/register:
+    post:
+      summary: Register a new user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password, fullName]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, minLength: 8 }
+                fullName: { type: string }
+                phone: { type: string }
+                role: { type: string, enum: [CUSTOMER, WORKER, FIELD_MANAGER, SALES_AGENT] }
+      responses:
+        "200": { description: Created }
+        "400": { description: Email already registered }
+
+  /api/auth/login:
+    post:
+      summary: Login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string }
+                password: { type: string }
+      responses:
+        "200": { description: Session }
+        "401": { description: Invalid credentials }
+        "429": { description: Rate limited }
+
+  /api/auth/refresh:
+    post:
+      summary: Rotate refresh token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refreshToken]
+              properties: { refreshToken: { type: string } }
+      responses:
+        "200": { description: New session }
+        "401": { description: Invalid refresh token }
+
+  /api/auth/me:
+    get:
+      summary: Current session user
+      responses:
+        "200": { description: User + profile }
+
+  /api/bookings:
+    get:
+      summary: List bookings
+      parameters:
+        - { in: query, name: status, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, default: 50 } }
+        - { in: query, name: offset, schema: { type: integer, default: 0 } }
+      responses: { "200": { description: List } }
+    post:
+      summary: Create booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [serviceTypeId, addressId, scheduledStart, scheduledEnd]
+              properties:
+                serviceTypeId: { type: string }
+                addressId: { type: string }
+                householdProfileId: { type: string }
+                scheduledStart: { type: string, format: date-time }
+                scheduledEnd: { type: string, format: date-time }
+                workerCount: { type: integer, default: 1 }
+                notes: { type: string }
+                photoUrls: { type: array, items: { type: string } }
+      responses: { "201": { description: Created } }
+
+  /api/bookings/{id}:
+    get:
+      summary: Get booking by id
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses: { "200": { description: Booking }, "404": { description: Not found } }
+    patch:
+      summary: Transition booking status
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [toStatus]
+              properties:
+                toStatus: { type: string }
+                reason: { type: string }
+      responses: { "200": { description: Updated }, "409": { description: Invalid transition } }
+
+  /api/bookings/{id}/dispatch:
+    post:
+      summary: Auto-dispatch or manually assign worker
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { workerId: { type: string } }
+      responses: { "200": { description: Dispatch result } }
+
+  /api/bookings/{id}/payment:
+    post:
+      summary: Create PaymentIntent via Payswap
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses: { "200": { description: PaymentIntent reference } }
+
+  /api/bookings/{id}/ratings:
+    post:
+      summary: Rate a completed booking
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [punctuality, professionalism, cleanliness, friendliness, overall]
+              properties:
+                punctuality: { type: integer, minimum: 1, maximum: 5 }
+                professionalism: { type: integer, minimum: 1, maximum: 5 }
+                cleanliness: { type: integer, minimum: 1, maximum: 5 }
+                friendliness: { type: integer, minimum: 1, maximum: 5 }
+                overall: { type: integer, minimum: 1, maximum: 5 }
+                comment: { type: string }
+      responses: { "201": { description: Rating created } }
+
+  /api/dispatch:
+    get:
+      summary: Dispatch queue (bookings awaiting assignment)
+      responses: { "200": { description: Queue } }
+    post:
+      summary: Trigger auto-dispatch for a booking
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bookingId]
+              properties: { bookingId: { type: string } }
+      responses: { "200": { description: Dispatch result } }
+
+  /api/payments/checkout:
+    post:
+      summary: Create Payswap Checkout Session for a booking
+      parameters:
+        - { in: query, name: bookingId, required: true, schema: { type: string } }
+      responses: { "200": { description: Checkout URL } }
+
+  /api/payments/intents/{id}/capture:
+    post:
+      summary: Capture a PaymentIntent via Payswap
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      responses: { "200": { description: Captured } }
+
+  /api/payments/intents/{id}/refund:
+    post:
+      summary: Refund a PaymentIntent via Payswap
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                amountMinor: { type: integer }
+                reason: { type: string }
+      responses: { "200": { description: Refunded } }
+
+  /api/payments/payouts:
+    post:
+      summary: Transfer payout to a worker's Payswap connected account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerId, amountMinor]
+              properties:
+                workerId: { type: string }
+                amountMinor: { type: integer }
+      responses: { "200": { description: Payout created } }
+
+  /api/payments/webhooks:
+    post:
+      summary: Payswap webhook receiver
+      security: []
+      parameters:
+        - { in: header, name: payswap-signature, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object }
+      responses: { "200": { description: Processed }, "400": { description: Invalid signature } }
+
+  /api/subscriptions:
+    get:
+      summary: List subscriptions
+      responses: { "200": { description: List } }
+    post:
+      summary: Create subscription (delegates billing to Payswap)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [planId]
+              properties: { planId: { type: string }, autoRenew: { type: boolean } }
+      responses: { "201": { description: Created } }
+
+  /api/subscriptions/{id}/{pause,resume,cancel}:
+    post:
+      summary: Pause / resume / cancel a subscription
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: string } }
+        - { in: path, name: pause|resume|cancel, required: true, schema: { type: string, enum: [pause, resume, cancel] } }
+      responses: { "200": { description: Updated } }
+
+  /api/inventory/items:
+    get:
+      summary: List inventory items
+      responses: { "200": { description: List } }
+    post:
+      summary: Create inventory item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sku, name, category]
+              properties:
+                sku: { type: string }
+                name: { type: string }
+                category: { type: string, enum: [CHEMICAL, TOOL, EQUIPMENT, PPE, VEHICLE, CONSUMABLE] }
+                hazardLevel: { type: string }
+                ppeRequired: { type: string }
+                approvedSurfaces: { type: string }
+                initialStock: { type: integer }
+      responses: { "201": { description: Created } }
+
+  /api/inventory/{id}/stock:
+    post:
+      summary: Issue stock to a worker
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [workerId, quantity]
+              properties: { workerId: { type: string }, quantity: { type: integer } }
+      responses: { "200": { description: Issued } }
+
+  /api/analytics/overview:
+    get:
+      summary: Platform analytics overview
+      responses: { "200": { description: Totals + recent bookings } }
+
+  /api/analytics/revenue:
+    get:
+      summary: Revenue time series
+      parameters:
+        - { in: query, name: days, schema: { type: integer, default: 30 } }
+      responses: { "200": { description: Revenue series } }
+
+  /api/audit:
+    get:
+      summary: Audit log
+      parameters:
+        - { in: query, name: action, schema: { type: string } }
+        - { in: query, name: userId, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, default: 100 } }
+      responses: { "200": { description: Audit entries } }
+
+  /api/sales/leads:
+    get:
+      summary: List sales leads
+      responses: { "200": { description: List } }
+    post:
+      summary: Create a lead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, phone]
+              properties:
+                name: { type: string }
+                phone: { type: string }
+                email: { type: string }
+                source: { type: string, enum: [DOOR_TO_DOOR, REFERRAL, SOCIAL, OTHER] }
+      responses: { "201": { description: Created } }
+
+  /api/sales/leads/{id}/convert:
+    post:
+      summary: Convert a lead to a customer (credits commission)
+      parameters: [{ in: path, name: id, required: true, schema: { type: string } }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, fullName]
+              properties: { email: { type: string }, fullName: { type: string }, phone: { type: string } }
+      responses: { "200": { description: Converted } }
+
+  /api/marketplace/applications:
+    post:
+      summary: Apply to the marketplace (gated by feature flag)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, fullName]
+              properties: { email: { type: string }, fullName: { type: string }, skills: { type: array, items: { type: string } } }
+      responses: { "201": { description: Application received }, "403": { description: Marketplace not open } }
+
+  /api/health:
+    get:
+      summary: Health check
+      security: []
+      responses: { "200": { description: OK }, "503": { description: Degraded } }

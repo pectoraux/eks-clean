@@ -1,0 +1,89 @@
+# ============================================================================
+#  Eks-Clean — Docker Compose (full stack)
+# ============================================================================
+#  Services:
+#    app        — Next.js web app (port 3000)
+#    realtime   — socket.io realtime service (3001 + internal 3002)
+#    postgres   — PostgreSQL 16 (production DB; dev uses SQLite)
+#    redis      — Redis 7 (for future BullMQ upgrade)
+#
+#  Usage:
+#    docker compose up -d
+#    docker compose exec app npx prisma migrate deploy
+#    docker compose exec app npm run seed
+# ============================================================================
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=postgresql://eks:eks@postgres:5432/eksclean
+      - JWT_SECRET=${JWT_SECRET:-change_me_in_production}
+      - PAYS_SWAP_API_KEY=${PAYS_SWAP_API_KEY:-}
+      - PAYS_SWAP_BASE_URL=${PAYS_SWAP_BASE_URL:-https://api.payswap.example/v1}
+      - PAYS_SWAP_WEBHOOK_SECRET=${PAYS_SWAP_WEBHOOK_SECRET:-change_me}
+      - REALTIME_INTERNAL_URL=http://realtime:3002
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      realtime:
+        condition: service_started
+    restart: unless-stopped
+
+  realtime:
+    build:
+      context: .
+      dockerfile: mini-services/realtime/Dockerfile
+    ports:
+      - "3001:3001"
+      - "3002:3002"
+    environment:
+      - NODE_ENV=production
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: eks
+      POSTGRES_PASSWORD: eks
+      POSTGRES_DB: eksclean
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eks -d eksclean"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

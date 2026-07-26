@@ -1,0 +1,924 @@
+// ============================================================================
+//  Eks-Clean — Household Services Operating System
+//  Database Schema (SQLite for dev; designed for PostgreSQL portability)
+//  Conventions:
+//   - Soft-delete via `deletedAt DateTime?`
+//   - Audit via AuditLog entries (write-side)
+//   - All money fields stored as integer minor units (e.g. pesewas/cents)
+//   - All ids are cuid() strings
+//   - Enums are stored as String for SQLite compatibility; values are typed
+//     in src/lib/types/*.ts and validated with zod.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+//  AUTH & IDENTITY
+// ============================================================================
+
+model User {
+  id              String   @id @default(cuid())
+  email           String   @unique
+  passwordHash    String
+  fullName        String
+  phone           String?
+  avatarUrl       String?
+  role            String   @default("CUSTOMER") // CUSTOMER | WORKER | FIELD_MANAGER | SALES_AGENT | ADMIN
+  status          String   @default("ACTIVE")   // ACTIVE | SUSPENDED | DELETED | PENDING
+  mfaSecret       String?                       // MFA-ready (TOTP secret)
+  mfaEnabled      Boolean  @default(false)
+  lastLoginAt     DateTime?
+  failedLoginCount Int     @default(0)
+  lockedUntil     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  refreshTokens   RefreshToken[]
+  auditLogs       AuditLog[]
+  notifications   Notification[]
+
+  customer        Customer?
+  worker          Worker?
+  fieldManager    FieldManager?
+  salesAgent      SalesAgent?
+
+  @@index([role])
+  @@index([status])
+}
+
+model RefreshToken {
+  id          String   @id @default(cuid())
+  userId      String
+  tokenHash   String   @unique
+  userAgent   String?
+  ipAddress   String?
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  code        String   @unique // e.g. bookings:create, workers:approve
+  description String
+  roles       RolePermission[]
+}
+
+model RolePermission {
+  roleId      String
+  permissionId String
+  role        String   // CUSTOMER | WORKER | FIELD_MANAGER | SALES_AGENT | ADMIN
+  permission  Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+}
+
+// ============================================================================
+//  CUSTOMERS
+// ============================================================================
+
+model Customer {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  payswapCustomerId String? // Payment gateway reference (never store cards)
+  preferredLanguage String? @default("en")
+  marketingOptIn  Boolean  @default(true)
+  loyaltyPoints   Int      @default(0)
+  customerTier    String   @default("STANDARD") // STANDARD | SILVER | GOLD | PLATINUM
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  addresses       Address[]
+  householdProfiles HouseholdProfile[]
+  bookings        Booking[]
+  subscriptions   Subscription[]
+  ratings         Rating[]
+  favorites       FavoriteWorker[]
+  supportTickets  SupportTicket[]
+
+  @@index([customerTier])
+}
+
+model Address {
+  id          String   @id @default(cuid())
+  customerId  String
+  label       String   @default("Home") // Home | Work | Other
+  line1       String
+  line2       String?
+  city        String
+  region      String?
+  postalCode  String?
+  country     String   @default("Ghana")
+  latitude    Float?
+  longitude   Float?
+  instructions String?
+  isDefault   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  deletedAt   DateTime?
+
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  bookings    Booking[]
+
+  @@index([customerId])
+}
+
+model HouseholdProfile {
+  id          String   @id @default(cuid())
+  customerId  String
+  name        String   // e.g. "Main House", "Apartment B"
+  propertyType String? // APARTMENT | HOUSE | OFFICE | STUDIO
+  bedrooms    Int      @default(1)
+  bathrooms   Int      @default(1)
+  squareMeters Float?
+  hasPets     Boolean  @default(false)
+  petDetails  String?
+  hasChildren Boolean  @default(false)
+  accessNotes String?
+  parkingAvailable Boolean @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  bookings    Booking[]
+
+  @@index([customerId])
+}
+
+model FavoriteWorker {
+  id          String   @id @default(cuid())
+  customerId  String
+  workerId    String
+  createdAt   DateTime @default(now())
+
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([customerId, workerId])
+}
+
+// ============================================================================
+//  WORKERS
+// ============================================================================
+
+model Worker {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  employeeId        String?  @unique
+  payswapAccountId  String?  // Connected account reference
+  status            String   @default("PENDING") // PENDING | ACTIVE | SUSPENDED | TERMINATED
+  onboardingStep    String   @default("PROFILE") // PROFILE | KYC | SKILLS | TRAINING | EQUIPMENT | LIVE
+  kycStatus         String   @default("NOT_SUBMITTED") // NOT_SUBMITTED | PENDING | VERIFIED | REJECTED
+  kycSubmittedAt    DateTime?
+  kycVerifiedAt     DateTime?
+  averageRating     Float    @default(0)
+  totalRatings      Int      @default(0)
+  completedJobs     Int      @default(0)
+  cancelledJobs     Int      @default(0)
+  utilizationRate   Float    @default(0) // 0..1 weekly utilization
+  homeLatitude      Float?
+  homeLongitude     Float?
+  preferredRadiusKm Int      @default(15)
+  bankAccountRef    String?
+  emergencyContact  String?
+  hireDate          DateTime?
+  terminationDate   DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  deletedAt         DateTime?
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skills            WorkerSkill[]
+  certifications    WorkerCertification[]
+  trainingRecords   TrainingRecord[]
+  availabilities    WorkerAvailability[]
+  ratings           Rating[]
+  favorites         FavoriteWorker[]
+  inventoryItems    WorkerInventoryItem[]
+  attendance        WorkerAttendance[]
+  performanceReviews PerformanceReview[]
+  assignments       WorkerAssignment[]
+  payouts           Payout[]
+  qualityAudits     QualityAudit[]
+
+  @@index([status])
+  @@index([kycStatus])
+}
+
+model WorkerSkill {
+  id          String   @id @default(cuid())
+  workerId    String
+  skillCode   String   // e.g. CARPET_CLEANING, WINDOW_CLEANING
+  proficiency String   @default("BEGINNER") // BEGINNER | INTERMEDIATE | ADVANCED | EXPERT
+  certifiedAt DateTime?
+  createdAt   DateTime @default(now())
+
+  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([workerId, skillCode])
+  @@index([skillCode])
+}
+
+model WorkerCertification {
+  id          String   @id @default(cuid())
+  workerId    String
+  type        String   // SURFACE | CHEMICAL | EQUIPMENT | SAFETY
+  name        String   // e.g. "Marble Surface Care"
+  issuedBy    String?
+  issuedAt    DateTime
+  expiresAt   DateTime?
+  status      String   @default("ACTIVE") // ACTIVE | EXPIRED | REVOKED
+  documentUrl String?
+  createdAt   DateTime @default(now())
+
+  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId, type])
+  @@index([expiresAt])
+}
+
+model TrainingRecord {
+  id          String   @id @default(cuid())
+  workerId    String
+  moduleId    String
+  moduleName  String
+  startedAt   DateTime?
+  completedAt DateTime?
+  examScore   Float?
+  attempts    Int      @default(0)
+  status      String   @default("NOT_STARTED") // NOT_STARTED | IN_PROGRESS | PASSED | FAILED
+  certSurface String?  // surface category certified
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId, status])
+}
+
+model WorkerAvailability {
+  id          String   @id @default(cuid())
+  workerId    String
+  dayOfWeek   Int      // 0=Sun .. 6=Sat
+  startTime   String   // "08:00"
+  endTime     String   // "17:00"
+  isAvailable Boolean  @default(true)
+  effectiveFrom DateTime @default(now())
+  effectiveTo DateTime?
+
+  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId])
+}
+
+model WorkerAttendance {
+  id          String   @id @default(cuid())
+  workerId    String
+  date        DateTime
+  checkInAt   DateTime?
+  checkOutAt  DateTime?
+  status      String   @default("SCHEDULED") // SCHEDULED | PRESENT | LATE | ABSENT | LEAVE
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([workerId, date])
+}
+
+model PerformanceReview {
+  id          String   @id @default(cuid())
+  workerId    String
+  reviewerId  String   // FieldManager userId
+  period      String   // e.g. "2026-Q3"
+  rating      Float    // 1..5
+  strengths   String?
+  improvements String?
+  goals       String?
+  createdAt   DateTime @default(now())
+
+  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId])
+}
+
+model WorkerAssignment {
+  id          String   @id @default(cuid())
+  workerId    String
+  bookingId   String
+  assignedBy  String   // user id of manager/system
+  assignedAt  DateTime @default(now())
+  acceptedAt  DateTime?
+  rejectedAt  DateTime?
+  status      String   @default("OFFERED") // OFFERED | ACCEPTED | REJECTED | EXPIRED | REASSIGNED
+  routeOrder  Int?
+  estimatedTravelMinutes Int?
+
+  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([workerId, status])
+  @@index([bookingId])
+}
+
+// ============================================================================
+//  FIELD MANAGERS
+// ============================================================================
+
+model FieldManager {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  region          String?  // assigned territory
+  managedWorkerCount Int   @default(0)
+  hireDate        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  audits          QualityAudit[]
+}
+
+// ============================================================================
+//  SALES AGENTS
+// ============================================================================
+
+model SalesAgent {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  territory       String?
+  referralCode    String   @unique
+  commissionRate  Float    @default(0.05) // 5%
+  totalLeads      Int      @default(0)
+  convertedLeads  Int      @default(0)
+  totalCommissionMinor Int @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  leads           Lead[]
+
+  @@index([territory])
+}
+
+model Lead {
+  id              String   @id @default(cuid())
+  salesAgentId    String?
+  name            String
+  phone           String
+  email           String?
+  address         String?
+  source          String   @default("DOOR_TO_DOOR") // DOOR_TO_DOOR | REFERRAL | SOCIAL | OTHER
+  status          String   @default("NEW") // NEW | CONTACTED | INTERESTED | CONVERTED | LOST
+  notes           String?
+  convertedCustomerId String?
+  commissionCreditedMinor Int?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  salesAgent      SalesAgent? @relation(fields: [salesAgentId], references: [id], onDelete: SetNull)
+
+  @@index([salesAgentId, status])
+}
+
+// ============================================================================
+//  SERVICE CATALOG
+// ============================================================================
+
+model ServiceType {
+  id              String   @id @default(cuid())
+  code            String   @unique // e.g. HOME_CLEANING
+  name            String
+  description     String?
+  category        String   @default("GENERAL") // CLEANING | LAUNDRY | WASTE | DETAILING
+  basePriceMinor  Int      // base price in minor units
+  priceUnit       String   @default("PER_HOUR") // PER_HOUR | PER_JOB | PER_SQ_M | PER_KG
+  estimatedDurationMin Int
+  iconUrl         String?
+  isActive        Boolean  @default(true)
+  requiresCertification String? // comma-separated skill codes required
+  configJson      String?  // free-form JSON config (no code changes to add services)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  bookings        Booking[]
+  subscriptionPlans SubscriptionPlan[]
+  inventoryItems  InventoryItem[]
+
+  @@index([category, isActive])
+}
+
+// ============================================================================
+//  BOOKING ENGINE
+// ============================================================================
+
+model Booking {
+  id              String   @id @default(cuid())
+  code            String   @unique // human-friendly e.g. EKS-2026-001234
+  customerId      String
+  serviceTypeId   String
+  addressId       String
+  householdProfileId String?
+  status          String   @default("REQUESTED")
+  // draft | requested | assigned | worker_accepted | worker_en_route | arrived
+  // | in_progress | completed | rated | cancelled | disputed
+  scheduledStart  DateTime
+  scheduledEnd    DateTime
+  actualStart     DateTime?
+  actualEnd       DateTime?
+  workerCount     Int      @default(1)
+  notes           String?
+  photoUrls       String?  // JSON array of URLs
+  priceMinor      Int
+  discountMinor   Int      @default(0)
+  totalMinor      Int
+  currency        String   @default("GHS")
+  cancellationReason String?
+  disputeReason   String?
+  disputeStatus   String?
+  source          String   @default("WEB") // WEB | MOBILE | AGENT | RECURRING
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  serviceType     ServiceType  @relation(fields: [serviceTypeId], references: [id])
+  address         Address      @relation(fields: [addressId], references: [id])
+  householdProfile HouseholdProfile? @relation(fields: [householdProfileId], references: [id])
+  assignments     WorkerAssignment[]
+  ratings         Rating[]
+  qualityAudits   QualityAudit[]
+  laundryOrders   LaundryOrder[]
+  statusHistory   BookingStatusHistory[]
+  paymentIntents  PaymentIntent[]
+  events          DomainEvent[]
+
+  @@index([customerId, status])
+  @@index([serviceTypeId, status])
+  @@index([scheduledStart])
+  @@index([status])
+}
+
+model BookingStatusHistory {
+  id          String   @id @default(cuid())
+  bookingId   String
+  fromStatus  String?
+  toStatus    String
+  reason      String?
+  actorId     String?  // user id
+  actorType   String?  // SYSTEM | CUSTOMER | WORKER | MANAGER
+  metadataJson String?
+  createdAt   DateTime @default(now())
+
+  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  @@index([bookingId, createdAt])
+}
+
+// ============================================================================
+//  QUALITY MANAGEMENT
+// ============================================================================
+
+model Rating {
+  id              String   @id @default(cuid())
+  bookingId       String
+  customerId      String
+  workerId        String
+  punctuality     Int      // 1..5
+  professionalism Int
+  cleanliness     Int
+  friendliness    Int
+  overall         Int
+  comment         String?
+  photoUrls       String?  // JSON array
+  flagged         Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingId])
+  @@index([workerId])
+}
+
+model QualityAudit {
+  id              String   @id @default(cuid())
+  bookingId       String?
+  workerId        String
+  auditorId       String   // FieldManager id
+  score           Float    // 0..100
+  punctualityOk   Boolean  @default(true)
+  uniformOk       Boolean  @default(true)
+  equipmentOk     Boolean  @default(true)
+  chemicalUsageOk Boolean  @default(true)
+  customerInteractionOk Boolean @default(true)
+  findings        String?
+  photoUrls       String?  // JSON array
+  actionRequired  String?
+  followUpDate    DateTime?
+  createdAt       DateTime @default(now())
+
+  booking         Booking? @relation(fields: [bookingId], references: [id])
+  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  auditor         FieldManager @relation(fields: [auditorId], references: [id])
+
+  @@index([workerId])
+}
+
+// ============================================================================
+//  SUBSCRIPTIONS
+// ============================================================================
+
+model SubscriptionPlan {
+  id              String   @id @default(cuid())
+  serviceTypeId   String
+  name            String   // e.g. "Weekly Home Cleaning"
+  cadence         String   // WEEKLY | BIWEEKLY | MONTHLY | CUSTOM
+  cadenceDays     Int      // interval in days (7, 14, 30, etc.)
+  billingPriceMinor Int
+  discountPercent Float    @default(0.1) // 10% off vs single bookings
+  description     String?
+  isActive        Boolean  @default(true)
+  payswapPriceId  String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  serviceType     ServiceType @relation(fields: [serviceTypeId], references: [id])
+  subscriptions   Subscription[]
+
+  @@index([serviceTypeId, isActive])
+}
+
+model Subscription {
+  id              String   @id @default(cuid())
+  customerId      String
+  planId          String
+  payswapSubscriptionId String?
+  status          String   @default("ACTIVE") // ACTIVE | PAUSED | CANCELLED | EXPIRED | PAST_DUE
+  startDate       DateTime @default(now())
+  endDate         DateTime?
+  nextBillingDate DateTime?
+  pausedAt        DateTime?
+  cancelledAt     DateTime?
+  cancellationReason String?
+  autoRenew       Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+
+  customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  plan            SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@index([customerId, status])
+  @@index([status])
+}
+
+// ============================================================================
+//  INVENTORY
+// ============================================================================
+
+model InventoryItem {
+  id              String   @id @default(cuid())
+  sku             String   @unique
+  name            String
+  category        String   // CHEMICAL | TOOL | EQUIPMENT | PPE | VEHICLE | CONSUMABLE
+  description     String?
+  unit            String   @default("UNIT") // LITER | KG | UNIT | BOX
+  reorderLevel    Int      @default(10)
+  hazardLevel     String?  // LOW | MEDIUM | HIGH
+  ppeRequired     String?  // comma-separated
+  approvedSurfaces String? // comma-separated surface codes (for chemicals)
+  mixingInstructions String?
+  replacementRecommendation String?
+  imageUrl        String?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  serviceTypes    ServiceType[]
+  warehouseStock  WarehouseStock[]
+  workerStock     WorkerInventoryItem[]
+  movements       InventoryMovement[]
+}
+
+model WarehouseStock {
+  id              String   @id @default(cuid())
+  itemId          String
+  warehouseCode   String   @default("MAIN")
+  quantity        Int      @default(0)
+  reservedQty     Int      @default(0)
+  updatedAt       DateTime @updatedAt
+
+  item            InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, warehouseCode])
+}
+
+model WorkerInventoryItem {
+  id              String   @id @default(cuid())
+  workerId        String
+  itemId          String
+  quantity        Int      @default(0)
+  issuedAt        DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  worker          Worker        @relation(fields: [workerId], references: [id], onDelete: Cascade)
+  item            InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@unique([workerId, itemId])
+}
+
+model InventoryMovement {
+  id              String   @id @default(cuid())
+  itemId          String
+  fromLocation    String?  // warehouse code or worker id
+  toLocation      String?
+  quantity        Int      // negative = outflow
+  reason          String   // ISSUED | RETURNED | CONSUMED | RESTOCK | LOST | DAMAGED
+  referenceId     String?  // booking id / restock order
+  performedBy     String?  // user id
+  createdAt       DateTime @default(now())
+
+  item            InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+
+  @@index([itemId, createdAt])
+}
+
+// ============================================================================
+//  LAUNDRY
+// ============================================================================
+
+model LaundryOrder {
+  id              String   @id @default(cuid())
+  bookingId       String
+  pickupAt        DateTime?
+  sortedAt        DateTime?
+  washedAt        DateTime?
+  driedAt         DateTime?
+  ironedAt        DateTime?
+  packedAt        DateTime?
+  deliveredAt     DateTime?
+  totalGarments   Int      @default(0)
+  totalWeightKg   Float?
+  status          String   @default("PICKUP_PENDING")
+  // PICKUP_PENDING | SORTED | WASHING | DRYING | IRONING | PACKED | DELIVERED
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  garments        LaundryGarment[]
+
+  @@index([status])
+}
+
+model LaundryGarment {
+  id              String   @id @default(cuid())
+  orderId         String
+  barcode         String   @unique
+  garmentType     String   // SHIRT | TROUSER | DRESS | SHEET | OTHER
+  color           String?
+  material        String?
+  treatment       String?  // WASH_ONLY | DRY_CLEAN | IRON_ONLY
+  status          String   @default("RECEIVED")
+  photoUrl        String?
+  createdAt       DateTime @default(now())
+
+  order           LaundryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+// ============================================================================
+//  WASTE COLLECTION
+// ============================================================================
+
+model WasteSchedule {
+  id              String   @id @default(cuid())
+  zoneCode        String
+  routeCode       String?
+  pickupDay       Int      // 0..6
+  pickupWindow    String   // "06:00-10:00"
+  wasteCategories String   // comma-separated: ORGANIC | RECYCLABLE | GENERAL | HAZARDOUS
+  truckId         String?
+  driverWorkerId  String?
+  subscriptionId  String?
+  nextPickupDate  DateTime?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([zoneCode, isActive])
+}
+
+model WastePickupLog {
+  id              String   @id @default(cuid())
+  scheduleId      String
+  actualPickupAt  DateTime
+  volumeKg        Float?
+  categoriesCollected String?
+  photoUrl        String?
+  notes           String?
+  reportedBy      String?
+  createdAt       DateTime @default(now())
+
+  @@index([scheduleId, actualPickupAt])
+}
+
+// ============================================================================
+//  PAYMENTS (References only — never store card/bank details)
+// ============================================================================
+
+model PaymentIntent {
+  id              String   @id @default(cuid())
+  bookingId       String?
+  customerId      String?
+  payswapPaymentIntentId String? @unique
+  payswapCheckoutSessionId String?
+  amountMinor     Int
+  currency        String   @default("GHS")
+  status          String   @default("REQUIRES_PAYMENT_METHOD")
+  // REQUIRES_PAYMENT_METHOD | REQUIRES_ACTION | PROCESSING | SUCCEEDED | CANCELLED | FAILED
+  description     String?
+  metadataJson    String?
+  capturedAt      DateTime?
+  refundedAmountMinor Int  @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  booking         Booking? @relation(fields: [bookingId], references: [id])
+
+  @@index([customerId, status])
+  @@index([status])
+}
+
+model Payout {
+  id              String   @id @default(cuid())
+  workerId        String
+  periodStart     DateTime
+  periodEnd       DateTime
+  grossAmountMinor Int
+  platformFeeMinor Int
+  netAmountMinor  Int
+  payswapTransferId String?
+  status          String   @default("PENDING") // PENDING | IN_TRANSIT | PAID | FAILED
+  lineItemsJson   String?  // breakdown of bookings
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId, status])
+}
+
+model Invoice {
+  id              String   @id @default(cuid())
+  customerId      String?
+  subscriptionId  String?
+  payswapInvoiceId String? @unique
+  number          String?  @unique
+  amountMinor     Int
+  currency        String   @default("GHS")
+  status          String   @default("OPEN") // DRAFT | OPEN | PAID | VOID | UNCOLLECTIBLE
+  dueDate         DateTime?
+  paidAt          DateTime?
+  pdfUrl          String?
+  hostedUrl       String?
+  lineItemsJson   String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([customerId, status])
+}
+
+model PaymentWebhookEvent {
+  id              String   @id @default(cuid())
+  payswapEventId  String   @unique
+  type            String   // e.g. payment_intent.succeeded
+  payloadJson     String
+  signature       String?
+  verified        Boolean  @default(false)
+  processedAt     DateTime?
+  processingError String?
+  createdAt       DateTime @default(now())
+
+  @@index([type, verified])
+}
+
+// ============================================================================
+//  EVENTS (Event-driven architecture)
+// ============================================================================
+
+model DomainEvent {
+  id              String   @id @default(cuid())
+  bookingId       String?
+  eventType       String   // e.g. booking.created, worker.assigned, payment.captured
+  payloadJson     String
+  actorId         String?
+  actorType       String?
+  correlationId   String?
+  occurredAt      DateTime @default(now())
+
+  booking         Booking? @relation(fields: [bookingId], references: [id])
+
+  @@index([eventType, occurredAt])
+  @@index([correlationId])
+}
+
+// ============================================================================
+//  AUDIT & SECURITY
+// ============================================================================
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  userId          String?
+  action          String   // e.g. user.login, customer.create, booking.cancel
+  resourceType    String?
+  resourceId      String?
+  beforeJson      String?
+  afterJson       String?
+  ipAddress       String?
+  userAgent       String?
+  outcome         String   @default("SUCCESS") // SUCCESS | FAILURE | DENIED
+  reason          String?
+  createdAt       DateTime @default(now())
+
+  user            User?    @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([action])
+  @@index([resourceType, resourceId])
+}
+
+model FeatureFlag {
+  id              String   @id @default(cuid())
+  key             String   @unique
+  description     String?
+  enabled         Boolean  @default(false)
+  rolloutPercent  Int      @default(0)
+  targetRoles     String?  // comma-separated roles
+  configJson      String?
+  updatedAt       DateTime @updatedAt
+}
+
+model RateLimitBucket {
+  id              String   @id @default(cuid())
+  bucketKey       String   @unique // e.g. "ip:1.2.3.3:login"
+  tokens          Int
+  maxTokens       Int
+  refillPerSec    Int
+  lastRefillAt    DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+// ============================================================================
+//  NOTIFICATIONS & SUPPORT
+// ============================================================================
+
+model Notification {
+  id              String   @id @default(cuid())
+  userId          String
+  type            String   // BOOKING_UPDATE | PAYMENT | MARKETING | SYSTEM
+  title           String
+  body            String?
+  dataJson        String?
+  readAt          DateTime?
+  createdAt       DateTime @default(now())
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+}
+
+model SupportTicket {
+  id              String   @id @default(cuid())
+  customerId      String
+  subject         String
+  description     String
+  status          String   @default("OPEN") // OPEN | IN_PROGRESS | RESOLVED | CLOSED
+  priority        String   @default("NORMAL") // LOW | NORMAL | HIGH | URGENT
+  assignedTo      String?
+  resolution      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId, status])
+}

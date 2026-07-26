@@ -1,0 +1,12 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: "eks-clean-app"
+    static_configs:
+      - targets: ["app:3000"]
+    metrics_path: /api/health
+  - job_name: "eks-clean-realtime"
+    static_configs:
+      - targets: ["realtime:3002"]
+    metrics_path: /health
