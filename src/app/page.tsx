@@ -3,6 +3,9 @@
 import { useState } from "react";
 import dynamic from "next/dynamic";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+// Allow up to 60 seconds for cold starts with Neon DB cross-region
+export const maxDuration = 60;
 import { useAuth } from "@/lib/client";
 import { AuthPanel } from "@/components/eks/auth-panel";
 import { RealtimeFeed } from "@/components/eks/realtime-feed";

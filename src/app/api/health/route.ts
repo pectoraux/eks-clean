@@ -2,6 +2,8 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
+export const maxDuration = 60;
+
 export async function GET() {
   const checks: Record<string, { status: string; latencyMs?: number; error?: string }> = {};
   // DB

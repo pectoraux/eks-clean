@@ -14,6 +14,8 @@ import { writeAudit } from "@/lib/audit";
 import { consume, LIMITS } from "@/lib/ratelimit";
 import { z } from "zod";
 
+export const maxDuration = 60;
+
 const schema = z.object({
   // Allow non-standard emails like "user@gmail" (no TLD) for backward compat
   email: z.string().min(3).max(254).refine(
