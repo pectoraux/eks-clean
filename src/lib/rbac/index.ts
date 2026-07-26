@@ -64,7 +64,38 @@ export type Permission =
   | "analytics:global"
   // marketplace
   | "marketplace:register"
-  | "marketplace:approve";
+  | "marketplace:approve"
+  // CRM
+  | "crm:read"
+  | "crm:manage"
+  | "crm:campaigns:manage"
+  // Cleaning Protocols
+  | "protocols:read"
+  | "protocols:manage"
+  | "protocols:execute"
+  // LMS
+  | "lms:read"
+  | "lms:manage"
+  | "lms:enroll"
+  | "lms:certify"
+  // Supply Chain
+  | "scm:read"
+  | "scm:manage"
+  | "scm:approve_po"
+  // Fleet
+  | "fleet:read"
+  | "fleet:manage"
+  // Enterprise Contracts
+  | "contracts:read"
+  | "contracts:manage"
+  | "contracts:approve"
+  // Workflows
+  | "workflows:read"
+  | "workflows:manage"
+  | "workflows:execute"
+  // Advanced Analytics
+  | "analytics:views:manage"
+  | "analytics:reports:manage";
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   CUSTOMER: [
@@ -111,6 +142,21 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "analytics:read",
     "field_managers:recruit",
     "field_managers:audit",
+    "crm:read",
+    "protocols:read",
+    "protocols:manage",
+    "protocols:execute",
+    "lms:read",
+    "lms:manage",
+    "lms:enroll",
+    "lms:certify",
+    "scm:read",
+    "fleet:read",
+    "fleet:manage",
+    "contracts:read",
+    "workflows:read",
+    "workflows:execute",
+    "analytics:views:manage",
   ],
   SALES_AGENT: [
     "customers:read",
@@ -118,6 +164,10 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "sales:leads:manage",
     "sales:commission:read",
     "analytics:read",
+    "crm:read",
+    "crm:manage",
+    "crm:campaigns:manage",
+    "contracts:read",
   ],
   ADMIN: [
     "bookings:create",
@@ -159,8 +209,31 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "admin:audit_log:read",
     "analytics:read",
     "analytics:global",
+    "analytics:views:manage",
+    "analytics:reports:manage",
     "marketplace:register",
     "marketplace:approve",
+    "crm:read",
+    "crm:manage",
+    "crm:campaigns:manage",
+    "protocols:read",
+    "protocols:manage",
+    "protocols:execute",
+    "lms:read",
+    "lms:manage",
+    "lms:enroll",
+    "lms:certify",
+    "scm:read",
+    "scm:manage",
+    "scm:approve_po",
+    "fleet:read",
+    "fleet:manage",
+    "contracts:read",
+    "contracts:manage",
+    "contracts:approve",
+    "workflows:read",
+    "workflows:manage",
+    "workflows:execute",
   ],
 };
 
