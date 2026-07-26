@@ -2,7 +2,8 @@
 import { NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { getSessionFromHeaders } from "@/lib/auth";
-import { requirePerm, handle, parseJson, notFound, z } from "@/lib/utils/api";
+import { requirePerm, handle, parseJson, notFound } from "@/lib/utils/api";
+import { z } from "zod";
 
 const schema = z.object({
   skillCode: z.string(),
