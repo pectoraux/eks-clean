@@ -22,7 +22,7 @@ const schema = z.object({
     to: z.string(),
     key: z.string(),
     label: z.string().optional(),
-    guardConditions: z.record(z.unknown()).optional(),
+    guardConditions: z.record(z.string(), z.any()).optional(),
     actions: z.array(z.string()).optional(),
   })),
   isActive: z.boolean().optional(),

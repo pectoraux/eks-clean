@@ -95,7 +95,30 @@ export type Permission =
   | "workflows:execute"
   // Advanced Analytics
   | "analytics:views:manage"
-  | "analytics:reports:manage";
+  | "analytics:reports:manage"
+  // Milestone 2 — Knowledge Base
+  | "kb:read"
+  | "kb:write"
+  | "kb:publish"
+  | "kb:admin"
+  // Milestone 2 — Advanced Subscriptions
+  | "subscriptions:proration:manage"
+  | "subscriptions:addons:manage"
+  | "subscriptions:dunning:manage"
+  // Milestone 2 — Workforce Management
+  | "workforce:read"
+  | "workforce:schedules:manage"
+  | "workforce:paygrades:manage"
+  | "workforce:timeoff:approve"
+  | "workforce:performance:review"
+  // Milestone 2 — Event-Sourced Analytics
+  | "analytics:events:read"
+  | "analytics:projections:manage"
+  | "analytics:queries:manage"
+  // Milestone 2 — AI-Ready
+  | "ai:prompts:manage"
+  | "ai:runs:read"
+  | "ai:predictions:read";
 
 export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   CUSTOMER: [
@@ -111,6 +134,7 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "subscriptions:manage",
     "payments:read",
     "analytics:read",
+    "kb:read",
   ],
   WORKER: [
     "bookings:read",
@@ -121,6 +145,8 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "inventory:read",
     "payments:read",
     "analytics:read",
+    "kb:read",
+    "workforce:read",
   ],
   FIELD_MANAGER: [
     "bookings:read",
@@ -157,6 +183,18 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "workflows:read",
     "workflows:execute",
     "analytics:views:manage",
+    "kb:read",
+    "kb:write",
+    "kb:publish",
+    "subscriptions:addons:manage",
+    "workforce:read",
+    "workforce:schedules:manage",
+    "workforce:paygrades:manage",
+    "workforce:timeoff:approve",
+    "workforce:performance:review",
+    "analytics:events:read",
+    "ai:runs:read",
+    "ai:predictions:read",
   ],
   SALES_AGENT: [
     "customers:read",
@@ -234,6 +272,24 @@ export const DEFAULT_ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "workflows:read",
     "workflows:manage",
     "workflows:execute",
+    "kb:read",
+    "kb:write",
+    "kb:publish",
+    "kb:admin",
+    "subscriptions:proration:manage",
+    "subscriptions:addons:manage",
+    "subscriptions:dunning:manage",
+    "workforce:read",
+    "workforce:schedules:manage",
+    "workforce:paygrades:manage",
+    "workforce:timeoff:approve",
+    "workforce:performance:review",
+    "analytics:events:read",
+    "analytics:projections:manage",
+    "analytics:queries:manage",
+    "ai:prompts:manage",
+    "ai:runs:read",
+    "ai:predictions:read",
   ],
 };
 

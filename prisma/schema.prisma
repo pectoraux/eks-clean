@@ -227,6 +227,12 @@ model Worker {
   protocolExecutions ProtocolExecution[]
   enrollments      Enrollment[]
   lmsCertifications Certification[]
+  // Milestone 2 — workforce management
+  skillAssessments SkillAssessment[]
+  payGradeAssignments WorkerPayGradeAssignment[]
+  timeOffRequests  TimeOffRequest[]
+  shiftSchedules   ShiftSchedule[]
+  performanceScores WorkerPerformanceScore[]
 
   @@index([status])
   @@index([kycStatus])
@@ -1900,4 +1906,487 @@ model WaitlistEntry {
 
   @@index([status, createdAt])
   @@index([requestedRole])
+}
+
+// ============================================================================
+//  MILESTONE 2 — NEW MODULES
+//  (Additive only; no breaking changes to existing models)
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+//  KNOWLEDGE BASE
+// ----------------------------------------------------------------------------
+
+model KbArticle {
+  id              String   @id @default(cuid())
+  slug            String   @unique
+  title           String
+  body            String   // markdown
+  excerpt         String?
+  category        String   @default("GENERAL") // GENERAL | SAFETY | CHEMICAL | EQUIPMENT | HR | FAQ | RUNBOOK
+  tags            String[] @default([])
+  status          String   @default("DRAFT") // DRAFT | PUBLISHED | ARCHIVED
+  authorId        String?
+  viewsCount      Int      @default(0)
+  helpfulCount    Int      @default(0)
+  notHelpfulCount Int      @default(0)
+  pinnedToTop     Boolean  @default(false)
+  searchVector    String?  // precomputed "title excerpt tags body" for simple ILIKE search
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  publishedAt     DateTime?
+
+  versions        KbArticleVersion[]
+  feedback        KbArticleFeedback[]
+  linksToProcedures KbArticleProtocolLink[]
+  linksToServices KbArticleServiceLink[]
+
+  @@index([status, category])
+  @@index([pinnedToTop, publishedAt])
+}
+
+model KbArticleVersion {
+  id              String   @id @default(cuid())
+  articleId       String
+  version         Int
+  title           String
+  body            String
+  excerpt         String?
+  editedBy        String?
+  editedAt        DateTime @default(now())
+  changeSummary   String?
+
+  article         KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, version])
+  @@index([articleId, version])
+}
+
+model KbArticleFeedback {
+  id              String   @id @default(cuid())
+  articleId       String
+  userId          String?
+  helpful         Boolean
+  comment         String?
+  createdAt       DateTime @default(now())
+
+  article         KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@index([articleId, helpful])
+}
+
+model KbArticleProtocolLink {
+  id              String   @id @default(cuid())
+  articleId       String
+  protocolId      String
+  createdAt       DateTime @default(now())
+
+  article         KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, protocolId])
+}
+
+model KbArticleServiceLink {
+  id              String   @id @default(cuid())
+  articleId       String
+  serviceTypeId   String
+  createdAt       DateTime @default(now())
+
+  article         KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([articleId, serviceTypeId])
+}
+
+// ----------------------------------------------------------------------------
+//  ADVANCED SUBSCRIPTION MANAGEMENT
+//  (Pausing, proration, addons, usage tiers, dunning, lifecycle automation)
+// ----------------------------------------------------------------------------
+
+model SubscriptionAddon {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  description     String?
+  priceMinor      Int
+  billingCycle    String   @default("MONTHLY") // MONTHLY | ONE_TIME | PER_USE
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  subscriptions   SubscriptionAddonAssignment[]
+}
+
+model SubscriptionAddonAssignment {
+  id              String   @id @default(cuid())
+  subscriptionId  String
+  addonId         String
+  status          String   @default("ACTIVE") // ACTIVE | REMOVED
+  assignedAt      DateTime @default(now())
+  removedAt       DateTime?
+  prorationMinor  Int      @default(0)
+
+  addon           SubscriptionAddon @relation(fields: [addonId], references: [id])
+
+  @@index([subscriptionId, status])
+}
+
+model SubscriptionUsage {
+  id              String   @id @default(cuid())
+  subscriptionId  String
+  periodStart     DateTime
+  periodEnd       DateTime
+  unitsUsed       Int      @default(0)
+  unitsIncluded   Int      @default(0)
+  overageMinor    Int      @default(0)
+  lastUpdated     DateTime @default(now())
+
+  @@unique([subscriptionId, periodStart])
+}
+
+model SubscriptionDunningEvent {
+  id              String   @id @default(cuid())
+  subscriptionId  String
+  attemptNumber   Int
+  type            String   // RETRY | PAYMENT_FAILED | GRACE_PERIOD | SUSPENDED | CANCELLED
+  scheduledAt     DateTime
+  processedAt     DateTime?
+  status          String   @default("SCHEDULED") // SCHEDULED | SENT | RESOLVED | EXHAUSTED
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+
+  @@index([subscriptionId, status])
+  @@index([scheduledAt])
+}
+
+model SubscriptionPauseSchedule {
+  id              String   @id @default(cuid())
+  subscriptionId  String
+  startDate       DateTime
+  endDate         DateTime?
+  reason          String?
+  autoResume      Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  @@index([subscriptionId, startDate])
+}
+
+model SubscriptionLifecycleEvent {
+  id              String   @id @default(cuid())
+  subscriptionId  String
+  eventType       String   // CREATED | UPGRADED | DOWNGRADED | PAUSED | RESUMED | CANCELLED | RENEWED | ADDON_ADDED | ADDON_REMOVED | PRORATED | DUNNING_STARTED | DUNNING_RESOLVED
+  payloadJson     String?
+  actorId         String?
+  actorType       String?
+  correlationId   String?
+  occurredAt      DateTime @default(now())
+
+  @@index([subscriptionId, occurredAt])
+  @@index([eventType])
+}
+
+// ----------------------------------------------------------------------------
+//  COMPREHENSIVE WORKFORCE MANAGEMENT
+//  (Skills matrix, performance scoring, schedules, time-off, pay grades)
+// ----------------------------------------------------------------------------
+
+model Skill {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  category        String   @default("GENERAL") // CLEANING | SAFETY | EQUIPMENT | CHEMICAL | SOFT_SKILL | DRIVING
+  description     String?
+  levels          Int      @default(4) // 1..N
+  isCertificationRequired Boolean @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  assessments     SkillAssessment[]
+}
+
+model SkillAssessment {
+  id              String   @id @default(cuid())
+  skillId         String
+  workerId        String
+  assessorId      String?
+  level           Int      // 1..N
+  notes           String?
+  evidence        String?  // file URLs
+  assessedAt      DateTime @default(now())
+  expiresAt       DateTime?
+
+  skill           Skill   @relation(fields: [skillId], references: [id])
+  worker          Worker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([skillId, workerId])
+  @@index([workerId])
+}
+
+model PayGrade {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  name            String
+  baseHourlyMinor Int
+  overtimeMultiplier Float  @default(1.5)
+  weekendMultiplier Float  @default(1.25)
+  holidayMultiplier Float  @default(2.0)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  assignments     WorkerPayGradeAssignment[]
+}
+
+model WorkerPayGradeAssignment {
+  id              String   @id @default(cuid())
+  workerId        String
+  payGradeId      String
+  effectiveFrom   DateTime @default(now())
+  effectiveTo     DateTime?
+  assignedBy      String?
+
+  payGrade        PayGrade @relation(fields: [payGradeId], references: [id])
+  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId, effectiveFrom])
+}
+
+model TimeOffRequest {
+  id              String   @id @default(cuid())
+  workerId        String
+  type            String   // VACATION | SICK | PERSONAL | BEREAVEMENT | UNPAID
+  startDate       DateTime
+  endDate         DateTime
+  reason          String?
+  status          String   @default("PENDING") // PENDING | APPROVED | DENIED | CANCELLED
+  reviewedBy      String?
+  reviewedAt      DateTime?
+  denialReason    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  worker          Worker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@index([workerId, status])
+  @@index([status, startDate])
+}
+
+model ShiftSchedule {
+  id              String   @id @default(cuid())
+  workerId        String
+  date            DateTime
+  startTime       String   // "08:00"
+  endTime         String   // "17:00"
+  type            String   @default("REGULAR") // REGULAR | ON_CALL | OVERTIME | TRAINING
+  zone            String?
+  status          String   @default("SCHEDULED") // SCHEDULED | CONFIRMED | COMPLETED | NO_SHOW | SWAPPED
+  notes           String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  worker          Worker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([workerId, date, startTime])
+  @@index([date, status])
+  @@index([workerId, date])
+}
+
+model WorkerPerformanceScore {
+  id              String   @id @default(cuid())
+  workerId        String
+  period          String   // e.g. "2026-07"
+  overallScore    Float    // 0..100
+  punctualityScore Float
+  qualityScore    Float
+  productivityScore Float
+  customerScore   Float
+  teamScore       Float
+  trend           String   @default("STABLE") // UP | DOWN | STABLE
+  factorsJson     String?
+  computedAt      DateTime @default(now())
+
+  worker          Worker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
+
+  @@unique([workerId, period])
+  @@index([period, overallScore])
+}
+
+// ----------------------------------------------------------------------------
+//  EVENT-SOURCED ANALYTICS
+//  (Append-only event log + materialized projections)
+// ----------------------------------------------------------------------------
+
+model AnalyticsEvent {
+  id              String   @id @default(cuid())
+  aggregateType   String   // BOOKING | CUSTOMER | WORKER | REVENUE | PROTOCOL | CONTRACT
+  aggregateId     String
+  eventType       String   // e.g. "booking.completed", "payment.captured"
+  version         Int      // monotonic per aggregate
+  payloadJson     String
+  metadataJson    String?  // { actorId, actorType, ipAddress, userAgent, correlationId }
+  occurredAt      DateTime @default(now())
+  recordedAt      DateTime @default(now())
+
+  @@index([aggregateType, aggregateId, version])
+  @@index([aggregateType, eventType, occurredAt])
+  @@index([occurredAt])
+}
+
+model AnalyticsProjection {
+  id              String   @id @default(cuid())
+  projectionName  String   // e.g. "monthly_revenue", "worker_utilization", "customer_retention"
+  aggregateKey    String   // e.g. "2026-07" or "worker:abc123"
+  valueJson       String   // materialized value
+  lastEventId     String?  // last AnalyticsEvent.id processed
+  lastEventVersion Int?
+  computedAt      DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([projectionName, aggregateKey])
+  @@index([projectionName])
+}
+
+model AnalyticsQuery {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  queryType       String   // TIME_SERIES | COHORT | FUNNEL | TOP_N | COMPARISON
+  dataSource      String   // ANALYTICS_EVENT | PROJECTION | DB_VIEW
+  configJson      String   // { metric, dimensions, filters, timeRange }
+  isPublic        Boolean  @default(false)
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([queryType, isPublic])
+}
+
+model AnalyticsQueryRun {
+  id              String   @id @default(cuid())
+  queryId         String?
+  queryConfigJson String   // snapshot of the query config at run time
+  resultJson      String?
+  rowcount        Int      @default(0)
+  durationMs      Int      @default(0)
+  runBy           String?
+  runAt           DateTime @default(now())
+
+  @@index([queryId, runAt])
+}
+
+// ----------------------------------------------------------------------------
+//  AI-READY DATA STRUCTURES
+//  (Prompt templates, model configs, embeddings, agent runs, predictions)
+// ----------------------------------------------------------------------------
+
+model AiPromptTemplate {
+  id              String   @id @default(cuid())
+  key             String   @unique // e.g. "support.triage", "demand.forecast"
+  name            String
+  description     String?
+  systemPrompt    String
+  userPromptTemplate String // with {{variables}}
+  variablesJson   String   // [{ name, type, required, default }]
+  model           String   @default("gpt-4o-mini")
+  temperature     Float    @default(0.3)
+  maxTokens       Int      @default(1024)
+  isActive        Boolean  @default(true)
+  version         Int      @default(1)
+  createdBy       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  runs            AiAgentRun[]
+  embeddings      AiEmbedding[]
+}
+
+model AiModelConfig {
+  id              String   @id @default(cuid())
+  provider        String   // OPENAI | ANTHROPIC | LOCAL | ZAI
+  modelId         String
+  displayName     String
+  contextWindow   Int      @default(128000)
+  inputCostPer1kMinor Int  @default(0)
+  outputCostPer1kMinor Int @default(0)
+  capabilities    String[] @default([]) // TEXT | VISION | FUNCTION_CALLING | JSON_MODE | EMBEDDINGS
+  isActive        Boolean  @default(true)
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([provider, modelId])
+}
+
+model AiEmbedding {
+  id              String   @id @default(cuid())
+  entityType      String   // KB_ARTICLE | CUSTOMER | WORKER | BOOKING | PROTOCOL
+  entityId        String
+  promptTemplateId String?
+  embeddingModel  String   @default("text-embedding-3-small")
+  dimensions      Int      @default(1536)
+  vectorJson      String   // JSON-serialized Float[] (portable; switch to pgvector later)
+  chunkIndex      Int      @default(0)
+  chunkText       String
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+
+  promptTemplate  AiPromptTemplate? @relation(fields: [promptTemplateId], references: [id])
+
+  @@index([entityType, entityId])
+  @@index([entityType])
+}
+
+model AiAgentRun {
+  id              String   @id @default(cuid())
+  agentType       String   // SUPPORT_TRIAGE | DISPATCH_OPTIMIZER | DEMAND_FORECAST | QA_PREDICTOR | INVENTORY_FORECAST
+  promptTemplateId String?
+  triggerEventId  String?  // AnalyticsEvent id that triggered this run
+  inputJson       String   // variables + context
+  outputJson      String?  // model response
+  status          String   @default("PENDING") // PENDING | RUNNING | COMPLETED | FAILED | TIMEOUT
+  modelUsed       String?
+  promptTokens    Int      @default(0)
+  completionTokens Int     @default(0)
+  totalCostMinor  Int      @default(0)
+  latencyMs       Int      @default(0)
+  errorMessage    String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  createdAt       DateTime @default(now())
+
+  promptTemplate  AiPromptTemplate? @relation(fields: [promptTemplateId], references: [id])
+
+  @@index([agentType, status])
+  @@index([status, createdAt])
+}
+
+model AiPrediction {
+  id              String   @id @default(cuid())
+  predictionType  String   // DEMAND_FORECAST | CHURN_RISK | QA_SCORE | DISPATCH_OPTIMAL | INVENTORY_REORDER
+  entityType      String   // CUSTOMER | WORKER | SERVICE_TYPE | INVENTORY_ITEM | ZONE
+  entityId        String
+  predictedValue  Float
+  confidence      Float    // 0..1
+  horizonDays     Int      @default(7)
+  modelVersion    String?
+  featuresJson    String?
+  actualValue     Float?   // populated when the predicted event happens
+  accuracyScore   Float?   // populated post-hoc
+  generatedAt     DateTime @default(now())
+  resolvedAt      DateTime?
+
+  @@index([predictionType, entityType, entityId])
+  @@index([generatedAt])
+}
+
+model AiWorkflowAdapter {
+  id              String   @id @default(cuid())
+  workflowActionId String? // optional link to WorkflowAction
+  agentType       String
+  promptTemplateKey String?
+  triggerConditionsJson String?
+  outputMappingJson String? // how to map AI output back to entity fields
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  @@index([agentType, isActive])
 }

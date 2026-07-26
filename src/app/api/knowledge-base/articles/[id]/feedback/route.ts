@@ -1,23 +1,17 @@
 import { NextRequest } from "next/server";
 import { getSessionFromHeaders } from "@/lib/auth";
 import { requirePerm, handle, parseJson } from "@/lib/utils/api";
-import { transitionInstance } from "@/lib/modules/workflows/service";
+import { recordFeedback } from "@/lib/modules/knowledge-base/service";
 import { z } from "zod";
 
-const schema = z.object({
-  transitionKey: z.string(),
-  contextUpdate: z.record(z.string(), z.any()).optional(),
-});
+const schema = z.object({ helpful: z.boolean(), comment: z.string().max(500).optional() });
 
 export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   return handle(req, async () => {
     const session = await getSessionFromHeaders(req.headers);
-    requirePerm(session, "workflows:execute");
+    requirePerm(session, "kb:read");
     const { id } = await ctx.params;
     const body = await parseJson(req, schema);
-    return transitionInstance(id, body.transitionKey, {
-      id: session?.sub,
-      type: session?.role,
-    }, body.contextUpdate);
+    return recordFeedback(id, body.helpful, body.comment, session?.sub);
   });
 }

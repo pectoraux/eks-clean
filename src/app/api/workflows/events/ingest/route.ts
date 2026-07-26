@@ -6,7 +6,7 @@ import { z } from "zod";
 
 const schema = z.object({
   eventType: z.string(),
-  payload: z.record(z.unknown()),
+  payload: z.record(z.string(), z.any()),
 });
 
 export async function POST(req: NextRequest) {

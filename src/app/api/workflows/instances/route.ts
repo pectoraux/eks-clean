@@ -10,7 +10,7 @@ const startSchema = z.object({
   definitionId: z.string(),
   entityType: z.string(),
   entityId: z.string(),
-  context: z.record(z.unknown()).optional(),
+  context: z.record(z.string(), z.any()).optional(),
 });
 
 export async function GET(req: NextRequest) {

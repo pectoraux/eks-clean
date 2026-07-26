@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAuth } from "@/lib/client";
 import { AuthPanel } from "@/components/eks/auth-panel";
 import { RealtimeFeed } from "@/components/eks/realtime-feed";
-import { Sparkles, Activity, Calendar, Users, Wrench, Truck, Package, Repeat, Shield, BookOpen, LayoutDashboard, Briefcase, GraduationCap, Workflow, Heart } from "lucide-react";
+import { Sparkles, Activity, Calendar, Users, Wrench, Truck, Package, Repeat, Shield, BookOpen, LayoutDashboard, Briefcase, GraduationCap, Workflow, Heart, Brain, Database, BookMarked } from "lucide-react";
 
 // Lazy-load all heavy panels to reduce initial compile memory footprint.
 const AnalyticsOverview = dynamic(() => import("@/components/eks/analytics-overview").then(m => ({ default: m.AnalyticsOverview })));
@@ -25,6 +25,10 @@ const OperationsPanel = dynamic(() => import("@/components/eks/operations-panel"
 const LmsPanel = dynamic(() => import("@/components/eks/lms-panel").then(m => ({ default: m.LmsPanel })));
 const EnterprisePanel = dynamic(() => import("@/components/eks/enterprise-panel").then(m => ({ default: m.EnterprisePanel })));
 const WorkflowsPanel = dynamic(() => import("@/components/eks/workflows-panel").then(m => ({ default: m.WorkflowsPanel })));
+const KnowledgePanel = dynamic(() => import("@/components/eks/knowledge-panel").then(m => ({ default: m.KnowledgePanel })));
+const WorkforcePanel = dynamic(() => import("@/components/eks/workforce-panel").then(m => ({ default: m.WorkforcePanel })));
+const EventSourcedPanel = dynamic(() => import("@/components/eks/event-sourced-panel").then(m => ({ default: m.EventSourcedPanel })));
+const AiReadyPanel = dynamic(() => import("@/components/eks/ai-ready-panel").then(m => ({ default: m.AiReadyPanel })));
 
 export default function Home() {
   const { session } = useAuth();
@@ -52,6 +56,10 @@ export default function Home() {
               <TabsTrigger value="lms" className="gap-1.5"><GraduationCap className="w-3.5 h-3.5" /> LMS</TabsTrigger>
               <TabsTrigger value="enterprise" className="gap-1.5"><Briefcase className="w-3.5 h-3.5" /> Enterprise</TabsTrigger>
               <TabsTrigger value="workflows" className="gap-1.5"><Workflow className="w-3.5 h-3.5" /> Workflows</TabsTrigger>
+              <TabsTrigger value="knowledge" className="gap-1.5"><BookMarked className="w-3.5 h-3.5" /> Knowledge</TabsTrigger>
+              <TabsTrigger value="workforce" className="gap-1.5"><Users className="w-3.5 h-3.5" /> Workforce</TabsTrigger>
+              <TabsTrigger value="eventsourced" className="gap-1.5"><Database className="w-3.5 h-3.5" /> Event Log</TabsTrigger>
+              <TabsTrigger value="ai" className="gap-1.5"><Brain className="w-3.5 h-3.5" /> AI-Ready</TabsTrigger>
               <TabsTrigger value="audit" className="gap-1.5"><Shield className="w-3.5 h-3.5" /> Audit</TabsTrigger>
               <TabsTrigger value="architecture" className="gap-1.5"><BookOpen className="w-3.5 h-3.5" /> Architecture</TabsTrigger>
             </TabsList>
@@ -81,6 +89,10 @@ export default function Home() {
             <TabsContent value="lms"><LmsPanel /></TabsContent>
             <TabsContent value="enterprise"><EnterprisePanel /></TabsContent>
             <TabsContent value="workflows"><WorkflowsPanel /></TabsContent>
+            <TabsContent value="knowledge"><KnowledgePanel /></TabsContent>
+            <TabsContent value="workforce"><WorkforcePanel /></TabsContent>
+            <TabsContent value="eventsourced"><EventSourcedPanel /></TabsContent>
+            <TabsContent value="ai"><AiReadyPanel /></TabsContent>
             <TabsContent value="audit"><AuditPanel /></TabsContent>
             <TabsContent value="architecture"><ArchitecturePanel /></TabsContent>
           </Tabs>
