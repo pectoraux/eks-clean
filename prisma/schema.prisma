@@ -46,6 +46,7 @@ model User {
   refreshTokens   RefreshToken[]
   auditLogs       AuditLog[]
   apiKeys         ApiKey[]
+  appUsers         AppUser[]
 
   @@index([organizationId])
   @@index([status])
@@ -73,6 +74,7 @@ model Organization {
   executionPlans  ExecutionPlan[]
   workflows       WorkflowDefinition[]
   rules           Rule[]
+  applications     Application[]
   policies        Policy[]
   marketplaces    Marketplace[]
   offers          Offer[]
@@ -820,4 +822,128 @@ model Notification {
   readAt          DateTime?
   createdAt       DateTime @default(now())
   @@index([userId, readAt])
+}
+
+// ============================================================================
+//  APPLICATION LAYER
+//  OpsOS Kernel → Protocol → Application → Organization → Users
+//
+//  A Protocol is installed ONCE. Multiple Application instances can be
+//  created from the same protocol — each with its own branding, domain,
+//  users, and configuration. This makes OpsOS a true multi-tenant platform.
+// ============================================================================
+
+model Application {
+  id              String   @id @default(cuid())
+  organizationId  String
+  protocolKey     String   // which protocol powers this app
+  slug            String   @unique // URL slug: /apps/eks-clean
+  name            String   // "Eks-Clean" (customer-facing brand name)
+  description     String?
+  // Branding
+  logoUrl         String?
+  primaryColor    String   @default("#0066FF")
+  accentColor     String   @default("#00C896")
+  customDomain    String?  // clean.example.com
+  // Configuration
+  configJson      String?  // app-specific settings
+  defaultLocale   String   @default("en")
+  currency        String   @default("USD")
+  // Status
+  status          String   @default("ACTIVE") // ACTIVE | SUSPENDED | ARCHIVED
+  // Timestamps
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  users           AppUser[]
+  roles           AppRole[]
+  routes          AppRoute[]
+  menus           AppMenuItem[]
+  sessions        AppSession[]
+
+  @@index([organizationId])
+  @@index([protocolKey, status])
+}
+
+model AppUser {
+  id              String   @id @default(cuid())
+  applicationId   String
+  userId          String   // OpsOS User id
+  role            String   @default("CUSTOMER") // CUSTOMER | WORKER | MANAGER | ADMIN
+  status          String   @default("ACTIVE")
+  metadataJson    String?  // app-specific user profile data
+  sessions        AppSession[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  user            User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, userId])
+  @@index([applicationId, role])
+}
+
+model AppRole {
+  id              String   @id @default(cuid())
+  applicationId   String
+  key             String   // e.g. "CUSTOMER", "WORKER", "MANAGER"
+  name            String
+  description     String?
+  permissions     String[] @default([])
+  isDefault       Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  @@unique([applicationId, key])
+}
+
+model AppRoute {
+  id              String   @id @default(cuid())
+  applicationId   String
+  path            String   // "/book", "/dashboard", "/services"
+  component       String   // which UI component to render
+  label           String?  // nav label
+  icon            String?  // icon name
+  requiredRole    String?  // minimum role required
+  isPublic        Boolean  @default(false) // accessible without auth
+  order           Int      @default(0) // nav order
+  createdAt       DateTime @default(now())
+
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  @@unique([applicationId, path])
+  @@index([applicationId, isPublic])
+}
+
+model AppMenuItem {
+  id              String   @id @default(cuid())
+  applicationId   String
+  parentMenuId    String?
+  label           String
+  icon            String?
+  routePath       String?
+  order           Int      @default(0)
+  requiredRole    String?
+  isVisible       Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  parent          AppMenuItem?  @relation("MenuHierarchy", fields: [parentMenuId], references: [id])
+  children        AppMenuItem[] @relation("MenuHierarchy")
+
+  @@index([applicationId, order])
+}
+
+model AppSession {
+  id              String   @id @default(cuid())
+  applicationId   String
+  appUserId       String
+  tokenHash       String   @unique
+  expiresAt       DateTime
+  revokedAt       DateTime?
+  createdAt       DateTime @default(now())
+
+  application     Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  appUser         AppUser     @relation(fields: [appUserId], references: [id], onDelete: Cascade)
+  @@index([appUserId])
 }
