@@ -1,5 +1,4 @@
 {
-  "regions": ["cdg1"],
   "functions": {
     "app/**/*.{ts,tsx}": {
       "maxDuration": 60
