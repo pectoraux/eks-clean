@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/client";
@@ -9,8 +8,8 @@ export default function Home() {
   const { session } = useAuth();
 
   useEffect(() => {
-    // Redirect: admin users go to /admin, everyone else goes to first available app
-    if (session?.user.role === "ADMIN") {
+    // If logged in, go to admin. Otherwise go to the default app.
+    if (session) {
       router.replace("/admin");
     } else {
       router.replace("/apps/eks-clean");

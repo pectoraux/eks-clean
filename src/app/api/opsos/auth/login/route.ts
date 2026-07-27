@@ -21,6 +21,6 @@ export async function POST(req: NextRequest) {
       id: user.id, role: "ADMIN", email: user.email, fullName: user.fullName,
       ctx: { userAgent: getUserAgent(req), ipAddress: getIp(req) },
     });
-    return { user: { id: user.id, email: user.email, fullName: user.fullName, organizationId: user.organizationId }, session };
+    return { user: { id: user.id, email: user.email, fullName: user.fullName, organizationId: user.organizationId, role: "ADMIN" }, session };
   });
 }

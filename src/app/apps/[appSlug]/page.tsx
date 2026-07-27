@@ -46,9 +46,15 @@ export default function AppPage() {
   // Load app info
   useEffect(() => {
     if (!slug) return;
+    let active = true;
     (async () => {
       try {
         const r = await api<{ app: AppInfo }>(`/api/apps/${slug}`);
+        if (!active) return;
+        if (!r || !r.app) {
+          toast({ title: "Application not found", variant: "destructive" });
+          return;
+        }
         setApp(r.app);
         // Check for existing session
         const stored = localStorage.getItem(`${APP_SESSION_KEY}-${slug}`);
@@ -58,9 +64,10 @@ export default function AppPage() {
           setView("dashboard");
         }
       } catch {
-        toast({ title: "Application not found", variant: "destructive" });
+        if (active) toast({ title: "Application not found", variant: "destructive" });
       }
     })();
+    return () => { active = false; };
   }, [slug]);
 
   // Load services when session is available
@@ -68,8 +75,9 @@ export default function AppPage() {
     if (!session || !app) return;
     (async () => {
       try {
-        const r = await api<{ items: Array<Record<string, unknown>> }>(`/api/apps/${slug}/services`, {
-          headers: { Authorization: `Bearer ${session.accessToken}` },
+        const r = await fetch(`/api/apps/${slug}/services`, {
+          method: "GET",
+        headers: { Authorization: `Bearer ${session.accessToken}` },
         });
         setServices(r.items);
       } catch {}

@@ -27,7 +27,7 @@ export default function AdminConsole() {
       const r = await api<{ user: { id: string; email: string; fullName: string; organizationId: string | null }; session: { accessToken: string; refreshToken: string } }>("/api/opsos/auth/login", {
         method: "POST", body: JSON.stringify({ email, password }),
       });
-      setSession({ ...r.session, user: { ...r.user, role: "ADMIN" } as never });
+      setSession({ ...r.session, user: { id: r.user.id, email: r.user.email, fullName: r.user.fullName, role: "ADMIN" } });
       if (r.user.organizationId) setOrgId(r.user.organizationId);
       toast({ title: `Welcome, ${r.user.fullName}` });
     } catch (e) {
