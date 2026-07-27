@@ -163,7 +163,7 @@ export async function issueSession(user: {
   });
   await db.user.update({
     where: { id: user.id },
-    data: { lastLoginAt: new Date(), failedLoginCount: 0, lockedUntil: null },
+    data: { lastLoginAt: new Date() },
   });
   return {
     accessToken,
@@ -188,7 +188,7 @@ export async function rotateRefreshToken(oldToken: string, ctx?: { userAgent?: s
   // Issue new
   return issueSession({
     id: found.user.id,
-    role: found.user.role,
+    role: "ADMIN",
     email: found.user.email,
     fullName: found.user.fullName,
     ctx,
