@@ -1,13 +1,15 @@
 // ============================================================================
-//  Eks-Clean — Household Services Operating System
-//  Database Schema (SQLite for dev; designed for PostgreSQL portability)
-//  Conventions:
-//   - Soft-delete via `deletedAt DateTime?`
-//   - Audit via AuditLog entries (write-side)
-//   - All money fields stored as integer minor units (e.g. pesewas/cents)
-//   - All ids are cuid() strings
-//   - Enums are stored as String for SQLite compatibility; values are typed
-//     in src/lib/types/*.ts and validated with zod.
+//  OpsOS — Operations Operating System Kernel
+//  ============================================================================
+//  Domain-independent kernel. No business-specific concepts.
+//  Businesses are installed as Protocols via the Protocol SDK.
+//
+//  Core lifecycle: Demand → Intent → Validation → Policy → Capability →
+//    Resource → Scheduling → Routing → Execution Plan → Execution →
+//    Observation → Measurement → Learning → Recommendations
+//
+//  Architecture: Event Sourcing + CQRS + DDD + Plugin Architecture
+//  Runtime: Deterministic (RuntimeClock abstraction, no Date.now())
 // ============================================================================
 
 generator client {
@@ -21,7 +23,7 @@ datasource db {
 }
 
 // ============================================================================
-//  AUTH & IDENTITY
+//  IDENTITY & ORGANIZATIONS
 // ============================================================================
 
 model User {
@@ -31,14 +33,10 @@ model User {
   fullName        String
   phone           String?
   avatarUrl       String?
-  role            String   @default("CUSTOMER") // CUSTOMER | WORKER | FIELD_MANAGER | SALES_AGENT | ADMIN
-  status          String   @default("ACTIVE")   // ACTIVE | SUSPENDED | DELETED | PENDING
-  mfaSecret       String?                       // MFA-ready (TOTP secret)
+  status          String   @default("ACTIVE")
+  mfaSecret       String?
   mfaEnabled      Boolean  @default(false)
   lastLoginAt     DateTime?
-  failedLoginCount Int     @default(0)
-  lockedUntil     DateTime?
-  // Multi-tenancy: every user belongs to an organization
   organizationId  String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -47,2431 +45,49 @@ model User {
   organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
   refreshTokens   RefreshToken[]
   auditLogs       AuditLog[]
-  notifications   Notification[]
+  apiKeys         ApiKey[]
 
-  customer        Customer?
-  worker          Worker?
-  fieldManager    FieldManager?
-  salesAgent      SalesAgent?
-
-  @@index([role])
-  @@index([status])
   @@index([organizationId])
-}
-
-model RefreshToken {
-  id          String   @id @default(cuid())
-  userId      String
-  tokenHash   String   @unique
-  userAgent   String?
-  ipAddress   String?
-  expiresAt   DateTime
-  revokedAt   DateTime?
-  createdAt   DateTime @default(now())
-
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId])
-}
-
-model Permission {
-  id          String   @id @default(cuid())
-  code        String   @unique // e.g. bookings:create, workers:approve
-  description String
-  roles       RolePermission[]
-}
-
-model RolePermission {
-  roleId      String
-  permissionId String
-  role        String   // CUSTOMER | WORKER | FIELD_MANAGER | SALES_AGENT | ADMIN
-  permission  Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
-
-  @@id([roleId, permissionId])
-}
-
-// ============================================================================
-//  CUSTOMERS
-// ============================================================================
-
-model Customer {
-  id              String   @id @default(cuid())
-  userId          String   @unique
-  organizationId  String?
-  payswapCustomerId String? // Payment gateway reference (never store cards)
-  preferredLanguage String? @default("en")
-  marketingOptIn  Boolean  @default(true)
-  loyaltyPoints   Int      @default(0)
-  customerTier    String   @default("STANDARD") // STANDARD | SILVER | GOLD | PLATINUM
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  deletedAt       DateTime?
-
-  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  addresses       Address[]
-  householdProfiles HouseholdProfile[]
-  bookings        Booking[]
-  subscriptions   Subscription[]
-  ratings         Rating[]
-  favorites       FavoriteWorker[]
-  supportTickets  SupportTicket[]
-  // CRM + Enterprise relations
-  crmTouchpoints  CrmTouchpoint[]
-  crmDeals        CrmDeal[]
-  healthScore     CustomerHealthScore?
-  journeyStages   CustomerJourneyStage[]
-  contracts       EnterpriseContract[]
-  segmentMemberships CrmSegmentMembership[]
-  properties      Property[]
-
-  @@index([customerTier])
-  @@index([organizationId])
-}
-
-model Address {
-  id          String   @id @default(cuid())
-  customerId  String
-  label       String   @default("Home") // Home | Work | Other
-  line1       String
-  line2       String?
-  city        String
-  region      String?
-  postalCode  String?
-  country     String   @default("Ghana")
-  latitude    Float?
-  longitude   Float?
-  instructions String?
-  isDefault   Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  deletedAt   DateTime?
-
-  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  bookings    Booking[]
-
-  @@index([customerId])
-}
-
-model HouseholdProfile {
-  id          String   @id @default(cuid())
-  customerId  String
-  name        String   // e.g. "Main House", "Apartment B"
-  propertyType String? // APARTMENT | HOUSE | OFFICE | STUDIO
-  bedrooms    Int      @default(1)
-  bathrooms   Int      @default(1)
-  squareMeters Float?
-  hasPets     Boolean  @default(false)
-  petDetails  String?
-  hasChildren Boolean  @default(false)
-  accessNotes String?
-  parkingAvailable Boolean @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  bookings    Booking[]
-
-  @@index([customerId])
-}
-
-model FavoriteWorker {
-  id          String   @id @default(cuid())
-  customerId  String
-  workerId    String
-  createdAt   DateTime @default(now())
-
-  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@unique([customerId, workerId])
-}
-
-// ============================================================================
-//  WORKERS
-// ============================================================================
-
-model Worker {
-  id                String   @id @default(cuid())
-  userId            String   @unique
-  organizationId    String?
-  employeeId        String?  @unique
-  payswapAccountId  String?  // Connected account reference
-  status            String   @default("PENDING") // PENDING | ACTIVE | SUSPENDED | TERMINATED
-  onboardingStep    String   @default("PROFILE") // PROFILE | KYC | SKILLS | TRAINING | EQUIPMENT | LIVE
-  kycStatus         String   @default("NOT_SUBMITTED") // NOT_SUBMITTED | PENDING | VERIFIED | REJECTED
-  kycSubmittedAt    DateTime?
-  kycVerifiedAt     DateTime?
-  averageRating     Float    @default(0)
-  totalRatings      Int      @default(0)
-  completedJobs     Int      @default(0)
-  cancelledJobs     Int      @default(0)
-  utilizationRate   Float    @default(0) // 0..1 weekly utilization
-  homeLatitude      Float?
-  homeLongitude     Float?
-  preferredRadiusKm Int      @default(15)
-  bankAccountRef    String?
-  emergencyContact  String?
-  hireDate          DateTime?
-  terminationDate   DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
-  deletedAt         DateTime?
-
-  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organization      Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  skills            WorkerSkill[]
-  certifications    WorkerCertification[]
-  trainingRecords   TrainingRecord[]
-  availabilities    WorkerAvailability[]
-  ratings           Rating[]
-  favorites         FavoriteWorker[]
-  inventoryItems    WorkerInventoryItem[]
-  attendance        WorkerAttendance[]
-  performanceReviews PerformanceReview[]
-  assignments       WorkerAssignment[]
-  payouts           Payout[]
-  qualityAudits     QualityAudit[]
-  // LMS + Protocol + Fleet relations
-  protocolExecutions ProtocolExecution[]
-  enrollments      Enrollment[]
-  lmsCertifications Certification[]
-  // Milestone 2 — workforce management
-  skillAssessments SkillAssessment[]
-  payGradeAssignments WorkerPayGradeAssignment[]
-  timeOffRequests  TimeOffRequest[]
-  shiftSchedules   ShiftSchedule[]
-  performanceScores WorkerPerformanceScore[]
-
-  @@index([status])
-  @@index([kycStatus])
-}
-
-model WorkerSkill {
-  id          String   @id @default(cuid())
-  workerId    String
-  skillCode   String   // e.g. CARPET_CLEANING, WINDOW_CLEANING
-  proficiency String   @default("BEGINNER") // BEGINNER | INTERMEDIATE | ADVANCED | EXPERT
-  certifiedAt DateTime?
-  createdAt   DateTime @default(now())
-
-  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@unique([workerId, skillCode])
-  @@index([skillCode])
-}
-
-model WorkerCertification {
-  id          String   @id @default(cuid())
-  workerId    String
-  type        String   // SURFACE | CHEMICAL | EQUIPMENT | SAFETY
-  name        String   // e.g. "Marble Surface Care"
-  issuedBy    String?
-  issuedAt    DateTime
-  expiresAt   DateTime?
-  status      String   @default("ACTIVE") // ACTIVE | EXPIRED | REVOKED
-  documentUrl String?
-  createdAt   DateTime @default(now())
-
-  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@index([workerId, type])
-  @@index([expiresAt])
-}
-
-model TrainingRecord {
-  id          String   @id @default(cuid())
-  workerId    String
-  moduleId    String
-  moduleName  String
-  startedAt   DateTime?
-  completedAt DateTime?
-  examScore   Float?
-  attempts    Int      @default(0)
-  status      String   @default("NOT_STARTED") // NOT_STARTED | IN_PROGRESS | PASSED | FAILED
-  certSurface String?  // surface category certified
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@index([workerId, status])
-}
-
-model WorkerAvailability {
-  id          String   @id @default(cuid())
-  workerId    String
-  dayOfWeek   Int      // 0=Sun .. 6=Sat
-  startTime   String   // "08:00"
-  endTime     String   // "17:00"
-  isAvailable Boolean  @default(true)
-  effectiveFrom DateTime @default(now())
-  effectiveTo DateTime?
-
-  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@index([workerId])
-}
-
-model WorkerAttendance {
-  id          String   @id @default(cuid())
-  workerId    String
-  date        DateTime
-  checkInAt   DateTime?
-  checkOutAt  DateTime?
-  status      String   @default("SCHEDULED") // SCHEDULED | PRESENT | LATE | ABSENT | LEAVE
-  notes       String?
-  createdAt   DateTime @default(now())
-
-  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@unique([workerId, date])
-}
-
-model PerformanceReview {
-  id          String   @id @default(cuid())
-  workerId    String
-  reviewerId  String   // FieldManager userId
-  period      String   // e.g. "2026-Q3"
-  rating      Float    // 1..5
-  strengths   String?
-  improvements String?
-  goals       String?
-  createdAt   DateTime @default(now())
-
-  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@index([workerId])
-}
-
-model WorkerAssignment {
-  id          String   @id @default(cuid())
-  workerId    String
-  bookingId   String
-  assignedBy  String   // user id of manager/system
-  assignedAt  DateTime @default(now())
-  acceptedAt  DateTime?
-  rejectedAt  DateTime?
-  status      String   @default("OFFERED") // OFFERED | ACCEPTED | REJECTED | EXPIRED | REASSIGNED
-  routeOrder  Int?
-  estimatedTravelMinutes Int?
-
-  worker      Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-
-  @@index([workerId, status])
-  @@index([bookingId])
-}
-
-// ============================================================================
-//  FIELD MANAGERS
-// ============================================================================
-
-model FieldManager {
-  id              String   @id @default(cuid())
-  userId          String   @unique
-  region          String?  // assigned territory
-  managedWorkerCount Int   @default(0)
-  hireDate        DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  audits          QualityAudit[]
-}
-
-// ============================================================================
-//  SALES AGENTS
-// ============================================================================
-
-model SalesAgent {
-  id              String   @id @default(cuid())
-  userId          String   @unique
-  territory       String?
-  referralCode    String   @unique
-  commissionRate  Float    @default(0.05) // 5%
-  totalLeads      Int      @default(0)
-  convertedLeads  Int      @default(0)
-  totalCommissionMinor Int @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  leads           Lead[]
-
-  @@index([territory])
-}
-
-model Lead {
-  id              String   @id @default(cuid())
-  salesAgentId    String?
-  name            String
-  phone           String
-  email           String?
-  address         String?
-  source          String   @default("DOOR_TO_DOOR") // DOOR_TO_DOOR | REFERRAL | SOCIAL | OTHER
-  status          String   @default("NEW") // NEW | CONTACTED | INTERESTED | CONVERTED | LOST
-  notes           String?
-  convertedCustomerId String?
-  commissionCreditedMinor Int?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  salesAgent      SalesAgent? @relation(fields: [salesAgentId], references: [id], onDelete: SetNull)
-
-  @@index([salesAgentId, status])
-}
-
-// ============================================================================
-//  SERVICE CATALOG
-// ============================================================================
-
-model ServiceType {
-  id              String   @id @default(cuid())
-  code            String   @unique // e.g. HOME_CLEANING
-  name            String
-  description     String?
-  category        String   @default("GENERAL") // CLEANING | LAUNDRY | WASTE | DETAILING
-  basePriceMinor  Int      // base price in minor units
-  priceUnit       String   @default("PER_HOUR") // PER_HOUR | PER_JOB | PER_SQ_M | PER_KG
-  estimatedDurationMin Int
-  iconUrl         String?
-  isActive        Boolean  @default(true)
-  requiresCertification String? // comma-separated skill codes required
-  configJson      String?  // free-form JSON config (no code changes to add services)
-  organizationId  String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  bookings        Booking[]
-  subscriptionPlans SubscriptionPlan[]
-  inventoryItems  InventoryItem[]
-  // Protocol + Contract relations
-  protocols       CleaningProtocol[]
-  contractLines   ContractLine[]
-
-  @@index([category, isActive])
-}
-
-// ============================================================================
-//  BOOKING ENGINE
-// ============================================================================
-
-model Booking {
-  id              String   @id @default(cuid())
-  code            String   @unique // human-friendly e.g. EKS-2026-001234
-  organizationId  String?
-  customerId      String
-  serviceTypeId   String
-  addressId       String
-  householdProfileId String?
-  status          String   @default("REQUESTED")
-  // draft | requested | assigned | worker_accepted | worker_en_route | arrived
-  // | in_progress | completed | rated | cancelled | disputed
-  scheduledStart  DateTime
-  scheduledEnd    DateTime
-  actualStart     DateTime?
-  actualEnd       DateTime?
-  workerCount     Int      @default(1)
-  notes           String?
-  photoUrls       String?  // JSON array of URLs
-  priceMinor      Int
-  discountMinor   Int      @default(0)
-  totalMinor      Int
-  currency        String   @default("GHS")
-  cancellationReason String?
-  disputeReason   String?
-  disputeStatus   String?
-  source          String   @default("WEB") // WEB | MOBILE | AGENT | RECURRING
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  deletedAt       DateTime?
-
-  customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  serviceType     ServiceType  @relation(fields: [serviceTypeId], references: [id])
-  address         Address      @relation(fields: [addressId], references: [id])
-  householdProfile HouseholdProfile? @relation(fields: [householdProfileId], references: [id])
-  assignments     WorkerAssignment[]
-  ratings         Rating[]
-  qualityAudits   QualityAudit[]
-  laundryOrders   LaundryOrder[]
-  statusHistory   BookingStatusHistory[]
-  paymentIntents  PaymentIntent[]
-  events          DomainEvent[]
-
-  @@index([customerId, status])
-  @@index([serviceTypeId, status])
-  @@index([scheduledStart])
   @@index([status])
 }
-
-model BookingStatusHistory {
-  id          String   @id @default(cuid())
-  bookingId   String
-  fromStatus  String?
-  toStatus    String
-  reason      String?
-  actorId     String?  // user id
-  actorType   String?  // SYSTEM | CUSTOMER | WORKER | MANAGER
-  metadataJson String?
-  createdAt   DateTime @default(now())
-
-  booking     Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-
-  @@index([bookingId, createdAt])
-}
-
-// ============================================================================
-//  QUALITY MANAGEMENT
-// ============================================================================
-
-model Rating {
-  id              String   @id @default(cuid())
-  bookingId       String
-  customerId      String
-  workerId        String
-  punctuality     Int      // 1..5
-  professionalism Int
-  cleanliness     Int
-  friendliness    Int
-  overall         Int
-  comment         String?
-  photoUrls       String?  // JSON array
-  flagged         Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@unique([bookingId])
-  @@index([workerId])
-}
-
-model QualityAudit {
-  id              String   @id @default(cuid())
-  bookingId       String?
-  workerId        String
-  auditorId       String   // FieldManager id
-  score           Float    // 0..100
-  punctualityOk   Boolean  @default(true)
-  uniformOk       Boolean  @default(true)
-  equipmentOk     Boolean  @default(true)
-  chemicalUsageOk Boolean  @default(true)
-  customerInteractionOk Boolean @default(true)
-  findings        String?
-  photoUrls       String?  // JSON array
-  actionRequired  String?
-  followUpDate    DateTime?
-  createdAt       DateTime @default(now())
-
-  booking         Booking? @relation(fields: [bookingId], references: [id])
-  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  auditor         FieldManager @relation(fields: [auditorId], references: [id])
-
-  @@index([workerId])
-}
-
-// ============================================================================
-//  SUBSCRIPTIONS
-// ============================================================================
-
-model SubscriptionPlan {
-  id              String   @id @default(cuid())
-  serviceTypeId   String
-  name            String   // e.g. "Weekly Home Cleaning"
-  cadence         String   // WEEKLY | BIWEEKLY | MONTHLY | CUSTOM
-  cadenceDays     Int      // interval in days (7, 14, 30, etc.)
-  billingPriceMinor Int
-  discountPercent Float    @default(0.1) // 10% off vs single bookings
-  description     String?
-  isActive        Boolean  @default(true)
-  payswapPriceId  String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  serviceType     ServiceType @relation(fields: [serviceTypeId], references: [id])
-  subscriptions   Subscription[]
-
-  @@index([serviceTypeId, isActive])
-}
-
-model Subscription {
-  id              String   @id @default(cuid())
-  organizationId  String?
-  customerId      String
-  planId          String
-  payswapSubscriptionId String?
-  status          String   @default("ACTIVE") // ACTIVE | PAUSED | CANCELLED | EXPIRED | PAST_DUE
-  startDate       DateTime @default(now())
-  endDate         DateTime?
-  nextBillingDate DateTime?
-  pausedAt        DateTime?
-  cancelledAt     DateTime?
-  cancellationReason String?
-  autoRenew       Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  deletedAt       DateTime?
-
-  customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  organization    Organization?    @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  plan            SubscriptionPlan @relation(fields: [planId], references: [id])
-
-  @@index([customerId, status])
-  @@index([status])
-}
-
-// ============================================================================
-//  INVENTORY
-// ============================================================================
-
-model InventoryItem {
-  id              String   @id @default(cuid())
-  sku             String   @unique
-  name            String
-  category        String   // CHEMICAL | TOOL | EQUIPMENT | PPE | VEHICLE | CONSUMABLE
-  description     String?
-  unit            String   @default("UNIT") // LITER | KG | UNIT | BOX
-  reorderLevel    Int      @default(10)
-  hazardLevel     String?  // LOW | MEDIUM | HIGH
-  ppeRequired     String?  // comma-separated
-  approvedSurfaces String? // comma-separated surface codes (for chemicals)
-  mixingInstructions String?
-  replacementRecommendation String?
-  imageUrl        String?
-  isActive        Boolean  @default(true)
-  organizationId  String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  serviceTypes    ServiceType[]
-  warehouseStock  WarehouseStock[]
-  workerStock     WorkerInventoryItem[]
-  movements       InventoryMovement[]
-  // SCM + Protocol relations
-  poLines         PurchaseOrderLine[]
-  receiptLines    GoodsReceiptLine[]
-  protocolStepChemicals ProtocolStepChemical[]
-}
-
-model WarehouseStock {
-  id              String   @id @default(cuid())
-  itemId          String
-  warehouseCode   String   @default("MAIN")
-  quantity        Int      @default(0)
-  reservedQty     Int      @default(0)
-  updatedAt       DateTime @updatedAt
-
-  item            InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-
-  @@unique([itemId, warehouseCode])
-}
-
-model WorkerInventoryItem {
-  id              String   @id @default(cuid())
-  workerId        String
-  itemId          String
-  quantity        Int      @default(0)
-  issuedAt        DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  worker          Worker        @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  item            InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-
-  @@unique([workerId, itemId])
-}
-
-model InventoryMovement {
-  id              String   @id @default(cuid())
-  itemId          String
-  fromLocation    String?  // warehouse code or worker id
-  toLocation      String?
-  quantity        Int      // negative = outflow
-  reason          String   // ISSUED | RETURNED | CONSUMED | RESTOCK | LOST | DAMAGED
-  referenceId     String?  // booking id / restock order
-  performedBy     String?  // user id
-  createdAt       DateTime @default(now())
-
-  item            InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-
-  @@index([itemId, createdAt])
-}
-
-// ============================================================================
-//  LAUNDRY
-// ============================================================================
-
-model LaundryOrder {
-  id              String   @id @default(cuid())
-  bookingId       String
-  pickupAt        DateTime?
-  sortedAt        DateTime?
-  washedAt        DateTime?
-  driedAt         DateTime?
-  ironedAt        DateTime?
-  packedAt        DateTime?
-  deliveredAt     DateTime?
-  totalGarments   Int      @default(0)
-  totalWeightKg   Float?
-  status          String   @default("PICKUP_PENDING")
-  // PICKUP_PENDING | SORTED | WASHING | DRYING | IRONING | PACKED | DELIVERED
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  booking         Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  garments        LaundryGarment[]
-
-  @@index([status])
-}
-
-model LaundryGarment {
-  id              String   @id @default(cuid())
-  orderId         String
-  barcode         String   @unique
-  garmentType     String   // SHIRT | TROUSER | DRESS | SHEET | OTHER
-  color           String?
-  material        String?
-  treatment       String?  // WASH_ONLY | DRY_CLEAN | IRON_ONLY
-  status          String   @default("RECEIVED")
-  photoUrl        String?
-  createdAt       DateTime @default(now())
-
-  order           LaundryOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-
-  @@index([orderId])
-}
-
-// ============================================================================
-//  WASTE COLLECTION
-// ============================================================================
-
-model WasteSchedule {
-  id              String   @id @default(cuid())
-  zoneCode        String
-  routeCode       String?
-  pickupDay       Int      // 0..6
-  pickupWindow    String   // "06:00-10:00"
-  wasteCategories String   // comma-separated: ORGANIC | RECYCLABLE | GENERAL | HAZARDOUS
-  truckId         String?
-  driverWorkerId  String?
-  subscriptionId  String?
-  nextPickupDate  DateTime?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([zoneCode, isActive])
-}
-
-model WastePickupLog {
-  id              String   @id @default(cuid())
-  scheduleId      String
-  actualPickupAt  DateTime
-  volumeKg        Float?
-  categoriesCollected String?
-  photoUrl        String?
-  notes           String?
-  reportedBy      String?
-  createdAt       DateTime @default(now())
-
-  @@index([scheduleId, actualPickupAt])
-}
-
-// ============================================================================
-//  PAYMENTS (References only — never store card/bank details)
-// ============================================================================
-
-model PaymentIntent {
-  id              String   @id @default(cuid())
-  bookingId       String?
-  customerId      String?
-  payswapPaymentIntentId String? @unique
-  payswapCheckoutSessionId String?
-  amountMinor     Int
-  currency        String   @default("GHS")
-  status          String   @default("REQUIRES_PAYMENT_METHOD")
-  // REQUIRES_PAYMENT_METHOD | REQUIRES_ACTION | PROCESSING | SUCCEEDED | CANCELLED | FAILED
-  description     String?
-  metadataJson    String?
-  capturedAt      DateTime?
-  refundedAmountMinor Int  @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  booking         Booking? @relation(fields: [bookingId], references: [id])
-
-  @@index([customerId, status])
-  @@index([status])
-}
-
-model Payout {
-  id              String   @id @default(cuid())
-  workerId        String
-  periodStart     DateTime
-  periodEnd       DateTime
-  grossAmountMinor Int
-  platformFeeMinor Int
-  netAmountMinor  Int
-  payswapTransferId String?
-  status          String   @default("PENDING") // PENDING | IN_TRANSIT | PAID | FAILED
-  lineItemsJson   String?  // breakdown of bookings
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@index([workerId, status])
-}
-
-model Invoice {
-  id              String   @id @default(cuid())
-  customerId      String?
-  subscriptionId  String?
-  payswapInvoiceId String? @unique
-  number          String?  @unique
-  amountMinor     Int
-  currency        String   @default("GHS")
-  status          String   @default("OPEN") // DRAFT | OPEN | PAID | VOID | UNCOLLECTIBLE
-  dueDate         DateTime?
-  paidAt          DateTime?
-  pdfUrl          String?
-  hostedUrl       String?
-  lineItemsJson   String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([customerId, status])
-}
-
-model PaymentWebhookEvent {
-  id              String   @id @default(cuid())
-  payswapEventId  String   @unique
-  type            String   // e.g. payment_intent.succeeded
-  payloadJson     String
-  signature       String?
-  verified        Boolean  @default(false)
-  processedAt     DateTime?
-  processingError String?
-  createdAt       DateTime @default(now())
-
-  @@index([type, verified])
-}
-
-// ============================================================================
-//  EVENTS (Event-driven architecture)
-// ============================================================================
-
-model DomainEvent {
-  id              String   @id @default(cuid())
-  bookingId       String?
-  eventType       String   // e.g. booking.created, worker.assigned, payment.captured
-  payloadJson     String
-  actorId         String?
-  actorType       String?
-  correlationId   String?
-  occurredAt      DateTime @default(now())
-
-  booking         Booking? @relation(fields: [bookingId], references: [id])
-
-  @@index([eventType, occurredAt])
-  @@index([correlationId])
-}
-
-// ============================================================================
-//  AUDIT & SECURITY
-// ============================================================================
-
-model AuditLog {
-  id              String   @id @default(cuid())
-  userId          String?
-  action          String   // e.g. user.login, customer.create, booking.cancel
-  resourceType    String?
-  resourceId      String?
-  beforeJson      String?
-  afterJson       String?
-  ipAddress       String?
-  userAgent       String?
-  outcome         String   @default("SUCCESS") // SUCCESS | FAILURE | DENIED
-  reason          String?
-  createdAt       DateTime @default(now())
-
-  user            User?    @relation(fields: [userId], references: [id])
-
-  @@index([userId, createdAt])
-  @@index([action])
-  @@index([resourceType, resourceId])
-}
-
-model FeatureFlag {
-  id              String   @id @default(cuid())
-  key             String   @unique
-  description     String?
-  enabled         Boolean  @default(false)
-  rolloutPercent  Int      @default(0)
-  targetRoles     String?  // comma-separated roles
-  configJson      String?
-  updatedAt       DateTime @updatedAt
-}
-
-model RateLimitBucket {
-  id              String   @id @default(cuid())
-  bucketKey       String   @unique // e.g. "ip:1.2.3.3:login"
-  tokens          Int
-  maxTokens       Int
-  refillPerSec    Int
-  lastRefillAt    DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-}
-
-// ============================================================================
-//  NOTIFICATIONS & SUPPORT
-// ============================================================================
-
-model Notification {
-  id              String   @id @default(cuid())
-  userId          String
-  type            String   // BOOKING_UPDATE | PAYMENT | MARKETING | SYSTEM
-  title           String
-  body            String?
-  dataJson        String?
-  readAt          DateTime?
-  createdAt       DateTime @default(now())
-
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@index([userId, readAt])
-}
-
-model SupportTicket {
-  id              String   @id @default(cuid())
-  customerId      String
-  subject         String
-  description     String
-  status          String   @default("OPEN") // OPEN | IN_PROGRESS | RESOLVED | CLOSED
-  priority        String   @default("NORMAL") // LOW | NORMAL | HIGH | URGENT
-  assignedTo      String?
-  resolution      String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-  @@index([customerId, status])
-}
-
-// ============================================================================
-//  ADVANCED CRM
-// ============================================================================
-
-model CrmSegment {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  rulesJson       String   // JSON: [{ field, op, value }] — evaluated against Customer
-  isDynamic       Boolean  @default(true)
-  memberCount     Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  campaigns       CrmCampaign[]
-  memberships     CrmSegmentMembership[]
-
-  @@index([name])
-}
-
-model CrmSegmentMembership {
-  id              String   @id @default(cuid())
-  segmentId       String
-  customerId      String
-  addedAt         DateTime @default(now())
-  reason          String?
-
-  segment         CrmSegment @relation(fields: [segmentId], references: [id], onDelete: Cascade)
-  customer        Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-  @@unique([segmentId, customerId])
-  @@index([customerId])
-}
-
-model CrmCampaign {
-  id              String   @id @default(cuid())
-  name            String
-  type            String   // EMAIL | SMS | PUSH | CALL | MIXED
-  status          String   @default("DRAFT") // DRAFT | SCHEDULED | RUNNING | PAUSED | COMPLETED | CANCELLED
-  channel         String
-  audienceSegmentId String?
-  startDate       DateTime?
-  endDate         DateTime?
-  sentCount       Int      @default(0)
-  openCount       Int      @default(0)
-  clickCount      Int      @default(0)
-  conversionCount Int      @default(0)
-  templateJson    String?
-  budgetMinor     Int      @default(0)
-  spentMinor      Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  segment         CrmSegment? @relation(fields: [audienceSegmentId], references: [id])
-  touchpoints     CrmTouchpoint[]
-
-  @@index([status])
-}
-
-model CrmTouchpoint {
-  id              String   @id @default(cuid())
-  customerId      String
-  campaignId      String?
-  channel         String   // EMAIL | SMS | CALL | IN_PERSON | WHATSAPP
-  direction       String   // OUTBOUND | INBOUND
-  subject         String?
-  body            String?
-  agentId         String?  // user id of rep
-  outcome         String?  // ANSWERED | NO_ANSWER | INTERESTED | NOT_INTERESTED | CONVERSION
-  durationSec     Int?
-  scheduledAt     DateTime?
-  occurredAt      DateTime @default(now())
-  createdAt       DateTime @default(now())
-
-  customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  campaign        CrmCampaign? @relation(fields: [campaignId], references: [id])
-
-  @@index([customerId, occurredAt])
-  @@index([campaignId])
-}
-
-model CrmDeal {
-  id              String   @id @default(cuid())
-  customerId      String
-  title           String
-  description     String?
-  valueMinor      Int
-  currency        String   @default("GHS")
-  stage           String   @default("LEAD") // LEAD | QUALIFIED | PROPOSAL | NEGOTIATION | WON | LOST
-  probability     Float    @default(0.1) // 0..1
-  expectedCloseAt DateTime?
-  ownerAgentId    String?  // user id (sales agent or account manager)
-  lostReason      String?
-  closedAt        DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-  @@index([customerId, stage])
-  @@index([stage])
-}
-
-model CustomerHealthScore {
-  id              String   @id @default(cuid())
-  customerId      String   @unique
-  score           Float    // 0..100
-  tier            String   @default("OK") // RISK | OK | GOOD | CHAMPION
-  factorsJson     String   // { retention, spend, engagement, complaints, ratings }
-  computedAt      DateTime @default(now())
-
-  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-  @@index([tier])
-}
-
-model CustomerJourneyStage {
-  id              String   @id @default(cuid())
-  customerId      String
-  stage           String   // AWARENESS | CONSIDERATION | ONBOARDING | ACTIVE | RENEWAL | CHURN_RISK | CHURNED | REACTIVATED
-  enteredAt       DateTime @default(now())
-  exitedAt        DateTime?
-
-  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-
-  @@index([customerId, stage])
-}
-
-// ============================================================================
-//  CLEANING PROTOCOL ENGINE
-// ============================================================================
-
-model CleaningProtocol {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  name            String
-  description     String?
-  serviceTypeId   String?
-  surfaceCode     String?  // MARBLE | GRANITE | WOOD | LAMINATE | LEATHER | FABRIC | GLASS | TILES | ELECTRONICS | VEHICLES | INDUSTRIAL
-  version         Int      @default(1)
-  isActive        Boolean  @default(true)
-  estimatedDurationMin Int
-  safetyNotes     String?
-  createdBy       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  serviceType     ServiceType? @relation(fields: [serviceTypeId], references: [id])
-  steps           ProtocolStep[]
-  executions      ProtocolExecution[]
-
-  @@index([serviceTypeId, isActive])
-  @@index([surfaceCode])
-}
-
-model ProtocolStep {
-  id              String   @id @default(cuid())
-  protocolId      String
-  order           Int
-  title           String
-  description     String?
-  expectedDurationMin Int
-  requiresPhoto   Boolean  @default(false)
-  chemicalNotes   String?  // free-form; specific items linked via ProtocolStepChemical
-  ppeRequired     String?
-  equipmentRequired String?
-  qualityChecklist String? // JSON array of checklist items
-  createdAt       DateTime @default(now())
-
-  protocol        CleaningProtocol @relation(fields: [protocolId], references: [id], onDelete: Cascade)
-  chemicals       ProtocolStepChemical[]
-  stepExecutions  ProtocolStepExecution[]
-
-  @@index([protocolId, order])
-}
-
-model ProtocolStepChemical {
-  id              String   @id @default(cuid())
-  stepId          String
-  itemId          String
-  quantityPerSqM  Float?
-  notes           String?
-
-  step            ProtocolStep  @relation(fields: [stepId], references: [id], onDelete: Cascade)
-  item            InventoryItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
-
-  @@unique([stepId, itemId])
-}
-
-model ProtocolExecution {
-  id              String   @id @default(cuid())
-  bookingId       String?
-  protocolId      String
-  workerId        String
-  startedAt       DateTime @default(now())
-  completedAt     DateTime?
-  status          String   @default("IN_PROGRESS") // IN_PROGRESS | COMPLETED | ABANDONED | DEVIATION
-  complianceScore Float?   // 0..100 — % of steps followed exactly
-  deviationNotes  String?
-  customerFeedback String?
-  createdAt       DateTime @default(now())
-
-  protocol        CleaningProtocol @relation(fields: [protocolId], references: [id])
-  worker          Worker           @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  stepExecutions  ProtocolStepExecution[]
-
-  @@index([protocolId, status])
-  @@index([workerId])
-}
-
-model ProtocolStepExecution {
-  id              String   @id @default(cuid())
-  executionId     String
-  stepId          String
-  startedAt       DateTime?
-  completedAt     DateTime?
-  status          String   @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | SKIPPED | FAILED
-  photoUrl        String?
-  notes           String?
-  deviationFlag   Boolean  @default(false)
-  deviationReason String?
-  checklistResultsJson String? // JSON: [{ item, passed }]
-  actualDurationMin Int?
-
-  execution       ProtocolExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
-  step            ProtocolStep      @relation(fields: [stepId], references: [id], onDelete: Cascade)
-
-  @@index([executionId])
-}
-
-// ============================================================================
-//  TRAINING LMS
-// ============================================================================
-
-model Course {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  title           String
-  description     String?
-  category        String   // SAFETY | SURFACE | CHEMICAL | EQUIPMENT | SOFT_SKILLS | COMPLIANCE
-  difficulty      String   @default("BEGINNER") // BEGINNER | INTERMEDIATE | ADVANCED | EXPERT
-  estimatedHours  Float    @default(1)
-  isActive        Boolean  @default(true)
-  version         Int      @default(1)
-  prereqCourseIds String?  // comma-separated course ids
-  coverImageUrl   String?
-  createdBy       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  lessons         Lesson[]
-  exams           Exam[]
-  enrollments     Enrollment[]
-  certifications  Certification[]
-
-  @@index([category, isActive])
-}
-
-model Lesson {
-  id              String   @id @default(cuid())
-  courseId        String
-  order           Int
-  title           String
-  contentMarkdown String?
-  contentUrl      String?
-  videoUrl        String?
-  durationMin     Int      @default(15)
-  passingScorePercent Float @default(70)
-  isRequired      Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  course          Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  progress        LessonProgress[]
-
-  @@index([courseId, order])
-}
-
-model Exam {
-  id              String   @id @default(cuid())
-  courseId        String
-  title           String
-  description     String?
-  passingScorePercent Float @default(70)
-  timeLimitMin    Int      @default(60)
-  maxAttempts     Int      @default(3)
-  questionsJson   String   // [{ id, text, type, options, correctAnswer, points }]
-  isFinal         Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  course          Course   @relation(fields: [courseId], references: [id], onDelete: Cascade)
-  attempts        ExamAttempt[]
-
-  @@index([courseId])
-}
-
-model Enrollment {
-  id              String   @id @default(cuid())
-  workerId        String
-  courseId        String
-  status          String   @default("NOT_STARTED") // NOT_STARTED | IN_PROGRESS | COMPLETED | DROPPED | EXPIRED
-  enrolledAt      DateTime @default(now())
-  startedAt       DateTime?
-  completedAt     DateTime?
-  dueAt           DateTime?
-  finalScorePercent Float?
-  certificateId   String?
-  assignedBy      String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  course          Course   @relation(fields: [courseId], references: [id])
-  lessonProgress  LessonProgress[]
-  examAttempts    ExamAttempt[]
-
-  @@unique([workerId, courseId])
-  @@index([workerId, status])
-  @@index([courseId, status])
-}
-
-model LessonProgress {
-  id              String   @id @default(cuid())
-  enrollmentId    String
-  lessonId        String
-  status          String   @default("NOT_STARTED") // NOT_STARTED | IN_PROGRESS | COMPLETED | FAILED
-  startedAt       DateTime?
-  completedAt     DateTime?
-  timeSpentMin    Int      @default(0)
-  attempts        Int      @default(0)
-  scorePercent    Float?
-  lastPositionSec Int      @default(0)
-
-  enrollment      Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
-  lesson          Lesson     @relation(fields: [lessonId], references: [id], onDelete: Cascade)
-
-  @@unique([enrollmentId, lessonId])
-}
-
-model ExamAttempt {
-  id              String   @id @default(cuid())
-  enrollmentId    String
-  examId          String
-  attemptNumber   Int
-  startedAt       DateTime @default(now())
-  submittedAt     DateTime?
-  scorePercent    Float?
-  passed          Boolean  @default(false)
-  answersJson     String?  // [{ questionId, selectedAnswer }]
-  timeSpentMin    Int?
-
-  enrollment      Enrollment @relation(fields: [enrollmentId], references: [id], onDelete: Cascade)
-  exam            Exam       @relation(fields: [examId], references: [id], onDelete: Cascade)
-
-  @@index([enrollmentId])
-  @@index([examId, passed])
-}
-
-model Certification {
-  id              String   @id @default(cuid())
-  workerId        String
-  courseId        String
-  certificateNumber String @unique
-  issuedAt        DateTime @default(now())
-  expiresAt       DateTime?
-  status          String   @default("ACTIVE") // ACTIVE | EXPIRED | REVOKED
-  issuedBy        String?
-  metadataJson    String?
-
-  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-  course          Course   @relation(fields: [courseId], references: [id])
-  recertifications RecertificationSchedule[]
-
-  @@index([workerId, status])
-  @@index([expiresAt])
-}
-
-model RecertificationSchedule {
-  id              String   @id @default(cuid())
-  certificationId String
-  dueAt           DateTime
-  reminderSentAt  DateTime?
-  status          String   @default("SCHEDULED") // SCHEDULED | REMINDED | COMPLETED | OVERDUE
-  notes           String?
-  createdAt       DateTime @default(now())
-
-  certification   Certification @relation(fields: [certificationId], references: [id], onDelete: Cascade)
-
-  @@index([dueAt, status])
-}
-
-// ============================================================================
-//  SUPPLY CHAIN MANAGEMENT
-// ============================================================================
-
-model Supplier {
-  id              String   @id @default(cuid())
-  organizationId  String?
-  code            String   @unique
-  name            String
-  contactName     String?
-  email           String?
-  phone           String?
-  address         String?
-  paymentTerms    String   @default("NET_30") // NET_15 | NET_30 | NET_60 | COD
-  taxId           String?
-  rating          Float    @default(0) // 0..5
-  isActive        Boolean  @default(true)
-  onboardedAt     DateTime @default(now())
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  purchaseOrders  PurchaseOrder[]
-  performanceRecords SupplierPerformance[]
-
-  @@index([isActive])
-  @@index([organizationId])
-}
-
-model PurchaseOrder {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  supplierId      String
-  warehouseCode   String   @default("MAIN")
-  status          String   @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | SENT | PARTIALLY_RECEIVED | RECEIVED | INVOICED | PAID | CANCELLED
-  expectedDeliveryAt DateTime?
-  actualDeliveryAt DateTime?
-  subtotalMinor   Int      @default(0)
-  taxMinor        Int      @default(0)
-  shippingMinor   Int      @default(0)
-  totalMinor      Int      @default(0)
-  currency        String   @default("GHS")
-  notes           String?
-  placedBy        String?
-  approvedBy      String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  supplier        Supplier        @relation(fields: [supplierId], references: [id])
-  lines           PurchaseOrderLine[]
-  receipts        GoodsReceipt[]
-
-  @@index([supplierId, status])
-  @@index([status])
-}
-
-model PurchaseOrderLine {
-  id              String   @id @default(cuid())
-  purchaseOrderId String
-  itemId          String
-  quantity        Int
-  receivedQty     Int      @default(0)
-  unitCostMinor   Int
-  totalMinor      Int
-  notes           String?
-
-  purchaseOrder   PurchaseOrder  @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
-  item            InventoryItem  @relation(fields: [itemId], references: [id])
-  receiptLines    GoodsReceiptLine[]
-
-  @@index([purchaseOrderId])
-}
-
-model GoodsReceipt {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  purchaseOrderId String
-  receivedAt      DateTime @default(now())
-  receivedBy      String?
-  qualityCheckPassed Boolean @default(true)
-  notes           String?
-  createdAt       DateTime @default(now())
-
-  purchaseOrder   PurchaseOrder    @relation(fields: [purchaseOrderId], references: [id])
-  lines           GoodsReceiptLine[]
-
-  @@index([purchaseOrderId])
-}
-
-model GoodsReceiptLine {
-  id              String   @id @default(cuid())
-  goodsReceiptId  String
-  poLineId        String
-  itemId          String
-  quantityReceived Int
-  quantityRejected Int     @default(0)
-  rejectionReason String?
-  notes           String?
-
-  goodsReceipt    GoodsReceipt    @relation(fields: [goodsReceiptId], references: [id], onDelete: Cascade)
-  poLine          PurchaseOrderLine @relation(fields: [poLineId], references: [id], onDelete: Cascade)
-  item            InventoryItem   @relation(fields: [itemId], references: [id])
-
-  @@index([goodsReceiptId])
-}
-
-model SupplierPerformance {
-  id              String   @id @default(cuid())
-  supplierId      String
-  period          String   // e.g. "2026-07"
-  onTimeDeliveryRate Float // 0..1
-  qualityAcceptanceRate Float
-  averageLeadTimeDays Float
-  totalOrdersMinor Int
-  totalOrders     Int
-  createdAt       DateTime @default(now())
-
-  supplier        Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
-
-  @@unique([supplierId, period])
-}
-
-model Warehouse {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  name            String
-  address         String?
-  managerId       String?  // user id
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  transfers       WarehouseTransfer[] @relation("FromTransfers")
-  transfersTo     WarehouseTransfer[] @relation("ToTransfers")
-
-  @@index([isActive])
-}
-
-model WarehouseTransfer {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  fromWarehouseCode String
-  toWarehouseCode String
-  status          String   @default("REQUESTED") // REQUESTED | APPROVED | IN_TRANSIT | RECEIVED | CANCELLED
-  requestedAt     DateTime @default(now())
-  approvedAt      DateTime?
-  shippedAt       DateTime?
-  receivedAt      DateTime?
-  requestedBy     String?
-  approvedBy      String?
-  notes           String?
-  linesJson       String   // [{ itemId, quantity }]
-
-  fromWarehouse   Warehouse @relation("FromTransfers", fields: [fromWarehouseCode], references: [code])
-  toWarehouse     Warehouse @relation("ToTransfers", fields: [toWarehouseCode], references: [code])
-
-  @@index([status])
-}
-
-// ============================================================================
-//  FLEET MANAGEMENT
-// ============================================================================
-
-model Vehicle {
-  id              String   @id @default(cuid())
-  organizationId  String?
-  plateNumber     String   @unique
-  make            String
-  model           String
-  year            Int
-  type            String   // MOTORBIKE | SEDAN | VAN | TRUCK | TRICYCLE
-  status          String   @default("ACTIVE") // ACTIVE | MAINTENANCE | RETIRED | IMPounded
-  color           String?
-  vin             String?
-  mileageKm       Int      @default(0)
-  fuelLevelPercent Float   @default(100)
-  nextServiceKm   Int?
-  nextServiceDate DateTime?
-  insuranceExpiry DateTime?
-  roadworthyExpiry DateTime?
-  assignedWorkerId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  assignments     VehicleAssignment[]
-  maintenance     VehicleMaintenance[]
-  fuelLogs        FuelLog[]
-  inspections     VehicleInspection[]
-
-  @@index([status])
-  @@index([assignedWorkerId])
-  @@index([organizationId])
-}
-
-model VehicleAssignment {
-  id              String   @id @default(cuid())
-  vehicleId       String
-  workerId        String
-  assignedAt      DateTime @default(now())
-  returnedAt      DateTime?
-  purpose         String?
-  startingMileageKm Int?
-  endingMileageKm Int?
-  notes           String?
-
-  vehicle         Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-
-  @@index([vehicleId, assignedAt])
-}
-
-model VehicleMaintenance {
-  id              String   @id @default(cuid())
-  vehicleId       String
-  scheduledAt     DateTime?
-  completedAt     DateTime?
-  type            String   // OIL_CHANGE | TIRES | BRAKES | INSPECTION | REPAIR | ROUTINE
-  description     String?
-  costMinor       Int      @default(0)
-  odometerKm      Int?
-  vendorName      String?
-  performedBy     String?
-  status          String   @default("SCHEDULED") // SCHEDULED | IN_PROGRESS | COMPLETED | CANCELLED
-  notes           String?
-  createdAt       DateTime @default(now())
-
-  vehicle         Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-
-  @@index([vehicleId, status])
-}
-
-model FuelLog {
-  id              String   @id @default(cuid())
-  vehicleId       String
-  at              DateTime @default(now())
-  liters          Float
-  costMinor       Int
-  odometerKm      Int
-  fuelType        String   @default("PETROL") // PETROL | DIESEL | ELECTRIC_KWH
-  stationName     String?
-  filledBy        String?
-  notes           String?
-
-  vehicle         Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-
-  @@index([vehicleId, at])
-}
-
-model VehicleInspection {
-  id              String   @id @default(cuid())
-  vehicleId       String
-  inspectedAt     DateTime @default(now())
-  inspectedBy     String?
-  passed          Boolean  @default(true)
-  defectsJson     String?  // [{ component, severity, description }]
-  photoUrls       String?
-  nextInspectionDue DateTime?
-  notes           String?
-
-  vehicle         Vehicle @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
-
-  @@index([vehicleId, inspectedAt])
-}
-
-// ============================================================================
-//  ENTERPRISE CONTRACTS (B2B)
-// ============================================================================
-
-model EnterpriseContract {
-  id              String   @id @default(cuid())
-  contractNumber  String   @unique
-  organizationId  String?
-  customerId      String
-  title           String
-  description     String?
-  status          String   @default("DRAFT") // DRAFT | SENT | NEGOTIATING | ACTIVE | EXPIRING | EXPIRED | TERMINATED | RENEWED
-  startDate       DateTime
-  endDate         DateTime
-  slaTier         String   @default("STANDARD") // BASIC | STANDARD | PREMIUM | ENTERPRISE
-  autoRenew       Boolean  @default(false)
-  renewalPeriodMonths Int?
-  signedAt        DateTime?
-  signedBy        String?
-  accountManagerId String? // user id
-  totalContractValueMinor Int @default(0)
-  currency        String   @default("GHS")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  customer        Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: SetNull)
-  lines           ContractLine[]
-  milestones      ContractMilestone[]
-  billingSchedule ContractBillingSchedule[]
-  slas            ContractSLA[]
-  performance     ContractPerformance[]
-
-  @@index([customerId, status])
-  @@index([status])
-  @@index([endDate])
-}
-
-model ContractLine {
-  id              String   @id @default(cuid())
-  contractId      String
-  serviceTypeId   String
-  billingCycle    String   @default("MONTHLY") // WEEKLY | MONTHLY | QUARTERLY | ANNUALLY
-  unitPriceMinor  Int
-  minimumVolume   Int      @default(0)
-  includedVolume  Int      @default(0)
-  overagePriceMinor Int
-  notes           String?
-
-  contract        EnterpriseContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  serviceType     ServiceType        @relation(fields: [serviceTypeId], references: [id])
-
-  @@index([contractId])
-}
-
-model ContractMilestone {
-  id              String   @id @default(cuid())
-  contractId      String
-  name            String
-  description     String?
-  dueAt           DateTime
-  completedAt     DateTime?
-  status          String   @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | OVERDUE
-  notes           String?
-
-  contract        EnterpriseContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-
-  @@index([contractId, status])
-}
-
-model ContractBillingSchedule {
-  id              String   @id @default(cuid())
-  contractId      String
-  periodStart     DateTime
-  periodEnd       DateTime
-  amountMinor     Int
-  status          String   @default("SCHEDULED") // SCHEDULED | INVOICED | PAID | OVERDUE | CANCELLED
-  invoiceId       String?
-  invoicedAt      DateTime?
-  paidAt          DateTime?
-
-  contract        EnterpriseContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-
-  @@index([contractId, status])
-}
-
-model ContractSLA {
-  id              String   @id @default(cuid())
-  contractId      String
-  metric          String   // RESPONSE_TIME | RESOLUTION_TIME | QUALITY_SCORE | COMPLETION_RATE
-  targetHours     Int?
-  targetPercent   Float?
-  penaltyPercent  Float    @default(0)
-  notes           String?
-
-  contract        EnterpriseContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-
-  @@index([contractId])
-}
-
-model ContractPerformance {
-  id              String   @id @default(cuid())
-  contractId      String
-  period          String   // e.g. "2026-07"
-  slaComplianceRate Float
-  qualityScore    Float
-  utilizationRate Float
-  issuesCount     Int      @default(0)
-  penaltiesMinor  Int      @default(0)
-  notes           String?
-  createdAt       DateTime @default(now())
-
-  contract        EnterpriseContract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-
-  @@unique([contractId, period])
-}
-
-// ============================================================================
-//  WORKFLOW ENGINE (configurable + AI-ready)
-// ============================================================================
-
-model WorkflowDefinition {
-  id              String   @id @default(cuid())
-  key             String   @unique
-  name            String
-  description     String?
-  version         Int      @default(1)
-  entityType      String   // BOOKING | CONTRACT | WORKER | DEAL | PROTOCOL | generic
-  statesJson      String   // [{ key, label, isInitial, isFinal, color }]
-  transitionsJson String   // [{ from, to, key, label, guardConditions, actions }]
-  isActive        Boolean  @default(true)
-  createdBy       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  instances       WorkflowInstance[]
-  actions         WorkflowAction[]
-  triggers        WorkflowTrigger[]
-
-  @@index([entityType, isActive])
-}
-
-model WorkflowInstance {
-  id              String   @id @default(cuid())
-  definitionId    String
-  entityType      String
-  entityId        String
-  currentState    String
-  contextJson     String?
-  startedAt       DateTime @default(now())
-  completedAt     DateTime?
-  lastTransitionAt DateTime?
-
-  definition      WorkflowDefinition @relation(fields: [definitionId], references: [id])
-  transitionLogs  WorkflowTransitionLog[]
-
-  @@index([entityType, entityId])
-  @@index([currentState])
-}
-
-model WorkflowTransitionLog {
-  id              String   @id @default(cuid())
-  instanceId      String
-  fromState       String?
-  toState         String
-  transitionKey   String
-  actorId         String?
-  actorType       String?
-  metadataJson    String?
-  at              DateTime @default(now())
-
-  instance        WorkflowInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
-
-  @@index([instanceId, at])
-}
-
-model WorkflowAction {
-  id              String   @id @default(cuid())
-  definitionId    String
-  transitionKey   String
-  actionType      String   // WEBHOOK | AI_LLM | AI_FORECAST | AI_CLASSIFY | EMAIL | NOTIFICATION | QUEUE_JOB | UPDATE_FIELD | GATEWAY_CALL
-  name            String
-  configJson      String   // action-specific config (URL, prompt template, queue name, etc.)
-  order           Int      @default(0)
-  isAsync         Boolean  @default(false)
-  timeoutSec      Int      @default(30)
-
-  definition      WorkflowDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
-
-  @@index([definitionId, transitionKey])
-}
-
-model WorkflowTrigger {
-  id              String   @id @default(cuid())
-  definitionId    String
-  eventPattern    String   // e.g. "booking.created" or "payswap.payment_intent.succeeded"
-  conditionsJson  String?  // optional CEL/JSON-logic conditions
-  actionIdsJson   String?  // optional: trigger-specific actions (overrides transition actions)
-  isEnabled       Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  definition      WorkflowDefinition @relation(fields: [definitionId], references: [id], onDelete: Cascade)
-
-  @@index([definitionId])
-}
-
-// ============================================================================
-//  ADVANCED ANALYTICS
-// ============================================================================
-
-model AnalyticsView {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  ownerId         String?
-  scope           String   @default("USER") // USER | TEAM | GLOBAL
-  configJson      String   // [{ widgetType, dataSource, params, layout }]
-  isPublic        Boolean  @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([scope, isPublic])
-}
-
-model AnalyticsReport {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  schedule        String   // DAILY | WEEKLY | MONTHLY | QUARTERLY
-  recipientsJson  String   // array of user ids or emails
-  configJson      String   // report config
-  format          String   @default("PDF") // PDF | XLSX | CSV | JSON
-  lastRunAt       DateTime?
-  nextRunAt       DateTime?
-  isActive        Boolean  @default(true)
-  createdBy       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([isActive, nextRunAt])
-}
-
-model AnalyticsSnapshot {
-  id              String   @id @default(cuid())
-  metricKey       String   // e.g. "revenue.daily", "bookings.completion_rate"
-  period          String   // e.g. "2026-07-26" or "2026-W30" or "2026-07"
-  periodType      String   @default("DAY") // DAY | WEEK | MONTH | QUARTER
-  value           Float
-  dimensionsJson  String?  // optional breakdown dimensions
-  capturedAt      DateTime @default(now())
-
-  @@unique([metricKey, period])
-  @@index([metricKey, period])
-}
-
-// ============================================================================
-//  BACKWARD-COMPAT RELATIONS — extend existing models with new relations
-//  (Additive only; no breaking changes to existing columns)
-// ============================================================================
-
-// Customer already exists; we add new optional reverse relations
-// by re-declaring fields on the existing model below. To avoid Prisma
-// conflict, we use a one-to-many with the existing Customer model.
-// The relation fields on the new models above reference Customer directly;
-// Customer needs back-relation fields. We add them via a separate model
-// "CustomerCrmRelations" that mirrors the customer id — this keeps the
-// existing Customer model untouched while still being queryable.
-// (See Customer.* back-relations — added in a non-conflicting way below.)
-
-model CustomerCrmRelations {
-  id              String   @id @default(cuid())
-  customerId      String   @unique
-  // Aggregated CRM counters for fast UI rendering
-  touchpointCount Int      @default(0)
-  dealCount       Int      @default(0)
-  openDealValueMinor Int   @default(0)
-  journeyStage    String?  // current stage
-  healthScore     Float?
-  healthTier      String?
-  lastTouchpointAt DateTime?
-  updatedAt       DateTime @updatedAt
-
-  @@index([healthTier])
-  @@index([journeyStage])
-}
-
-
-// ============================================================================
-//  WAITLIST — sign-up flow puts users here; admin approves to create account
-// ============================================================================
-
-model WaitlistEntry {
-  id              String   @id @default(cuid())
-  email           String   @unique
-  fullName        String
-  phone           String?
-  passwordHash    String   // pre-hashed at submission; used when admin approves
-  requestedRole   String   @default("CUSTOMER") // CUSTOMER | WORKER | FIELD_MANAGER | SALES_AGENT
-  status          String   @default("PENDING") // PENDING | APPROVED | REJECTED
-  notes           String?  // admin notes
-  reviewedBy      String?  // admin user id
-  reviewedAt      DateTime?
-  rejectionReason String?
-  source          String   @default("WEB") // WEB | INVITE | IMPORT
-  ipAddress       String?
-  userAgent       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([status, createdAt])
-  @@index([requestedRole])
-}
-
-// ============================================================================
-//  MILESTONE 2 — NEW MODULES
-//  (Additive only; no breaking changes to existing models)
-// ============================================================================
-
-// ----------------------------------------------------------------------------
-//  KNOWLEDGE BASE
-// ----------------------------------------------------------------------------
-
-model KbArticle {
-  id              String   @id @default(cuid())
-  slug            String   @unique
-  title           String
-  body            String   // markdown
-  excerpt         String?
-  category        String   @default("GENERAL") // GENERAL | SAFETY | CHEMICAL | EQUIPMENT | HR | FAQ | RUNBOOK
-  tags            String[] @default([])
-  status          String   @default("DRAFT") // DRAFT | PUBLISHED | ARCHIVED
-  authorId        String?
-  viewsCount      Int      @default(0)
-  helpfulCount    Int      @default(0)
-  notHelpfulCount Int      @default(0)
-  pinnedToTop     Boolean  @default(false)
-  searchVector    String?  // precomputed "title excerpt tags body" for simple ILIKE search
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  publishedAt     DateTime?
-
-  versions        KbArticleVersion[]
-  feedback        KbArticleFeedback[]
-  linksToProcedures KbArticleProtocolLink[]
-  linksToServices KbArticleServiceLink[]
-
-  @@index([status, category])
-  @@index([pinnedToTop, publishedAt])
-}
-
-model KbArticleVersion {
-  id              String   @id @default(cuid())
-  articleId       String
-  version         Int
-  title           String
-  body            String
-  excerpt         String?
-  editedBy        String?
-  editedAt        DateTime @default(now())
-  changeSummary   String?
-
-  article         KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
-
-  @@unique([articleId, version])
-  @@index([articleId, version])
-}
-
-model KbArticleFeedback {
-  id              String   @id @default(cuid())
-  articleId       String
-  userId          String?
-  helpful         Boolean
-  comment         String?
-  createdAt       DateTime @default(now())
-
-  article         KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
-
-  @@index([articleId, helpful])
-}
-
-model KbArticleProtocolLink {
-  id              String   @id @default(cuid())
-  articleId       String
-  protocolId      String
-  createdAt       DateTime @default(now())
-
-  article         KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
-
-  @@unique([articleId, protocolId])
-}
-
-model KbArticleServiceLink {
-  id              String   @id @default(cuid())
-  articleId       String
-  serviceTypeId   String
-  createdAt       DateTime @default(now())
-
-  article         KbArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
-
-  @@unique([articleId, serviceTypeId])
-}
-
-// ----------------------------------------------------------------------------
-//  ADVANCED SUBSCRIPTION MANAGEMENT
-//  (Pausing, proration, addons, usage tiers, dunning, lifecycle automation)
-// ----------------------------------------------------------------------------
-
-model SubscriptionAddon {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  name            String
-  description     String?
-  priceMinor      Int
-  billingCycle    String   @default("MONTHLY") // MONTHLY | ONE_TIME | PER_USE
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  subscriptions   SubscriptionAddonAssignment[]
-}
-
-model SubscriptionAddonAssignment {
-  id              String   @id @default(cuid())
-  subscriptionId  String
-  addonId         String
-  status          String   @default("ACTIVE") // ACTIVE | REMOVED
-  assignedAt      DateTime @default(now())
-  removedAt       DateTime?
-  prorationMinor  Int      @default(0)
-
-  addon           SubscriptionAddon @relation(fields: [addonId], references: [id])
-
-  @@index([subscriptionId, status])
-}
-
-model SubscriptionUsage {
-  id              String   @id @default(cuid())
-  subscriptionId  String
-  periodStart     DateTime
-  periodEnd       DateTime
-  unitsUsed       Int      @default(0)
-  unitsIncluded   Int      @default(0)
-  overageMinor    Int      @default(0)
-  lastUpdated     DateTime @default(now())
-
-  @@unique([subscriptionId, periodStart])
-}
-
-model SubscriptionDunningEvent {
-  id              String   @id @default(cuid())
-  subscriptionId  String
-  attemptNumber   Int
-  type            String   // RETRY | PAYMENT_FAILED | GRACE_PERIOD | SUSPENDED | CANCELLED
-  scheduledAt     DateTime
-  processedAt     DateTime?
-  status          String   @default("SCHEDULED") // SCHEDULED | SENT | RESOLVED | EXHAUSTED
-  metadataJson    String?
-  createdAt       DateTime @default(now())
-
-  @@index([subscriptionId, status])
-  @@index([scheduledAt])
-}
-
-model SubscriptionPauseSchedule {
-  id              String   @id @default(cuid())
-  subscriptionId  String
-  startDate       DateTime
-  endDate         DateTime?
-  reason          String?
-  autoResume      Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  @@index([subscriptionId, startDate])
-}
-
-model SubscriptionLifecycleEvent {
-  id              String   @id @default(cuid())
-  subscriptionId  String
-  eventType       String   // CREATED | UPGRADED | DOWNGRADED | PAUSED | RESUMED | CANCELLED | RENEWED | ADDON_ADDED | ADDON_REMOVED | PRORATED | DUNNING_STARTED | DUNNING_RESOLVED
-  payloadJson     String?
-  actorId         String?
-  actorType       String?
-  correlationId   String?
-  occurredAt      DateTime @default(now())
-
-  @@index([subscriptionId, occurredAt])
-  @@index([eventType])
-}
-
-// ----------------------------------------------------------------------------
-//  COMPREHENSIVE WORKFORCE MANAGEMENT
-//  (Skills matrix, performance scoring, schedules, time-off, pay grades)
-// ----------------------------------------------------------------------------
-
-model Skill {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  name            String
-  category        String   @default("GENERAL") // CLEANING | SAFETY | EQUIPMENT | CHEMICAL | SOFT_SKILL | DRIVING
-  description     String?
-  levels          Int      @default(4) // 1..N
-  isCertificationRequired Boolean @default(false)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  assessments     SkillAssessment[]
-}
-
-model SkillAssessment {
-  id              String   @id @default(cuid())
-  skillId         String
-  workerId        String
-  assessorId      String?
-  level           Int      // 1..N
-  notes           String?
-  evidence        String?  // file URLs
-  assessedAt      DateTime @default(now())
-  expiresAt       DateTime?
-
-  skill           Skill   @relation(fields: [skillId], references: [id])
-  worker          Worker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@unique([skillId, workerId])
-  @@index([workerId])
-}
-
-model PayGrade {
-  id              String   @id @default(cuid())
-  code            String   @unique
-  name            String
-  baseHourlyMinor Int
-  overtimeMultiplier Float  @default(1.5)
-  weekendMultiplier Float  @default(1.25)
-  holidayMultiplier Float  @default(2.0)
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  assignments     WorkerPayGradeAssignment[]
-}
-
-model WorkerPayGradeAssignment {
-  id              String   @id @default(cuid())
-  workerId        String
-  payGradeId      String
-  effectiveFrom   DateTime @default(now())
-  effectiveTo     DateTime?
-  assignedBy      String?
-
-  payGrade        PayGrade @relation(fields: [payGradeId], references: [id])
-  worker          Worker   @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@index([workerId, effectiveFrom])
-}
-
-model TimeOffRequest {
-  id              String   @id @default(cuid())
-  workerId        String
-  type            String   // VACATION | SICK | PERSONAL | BEREAVEMENT | UNPAID
-  startDate       DateTime
-  endDate         DateTime
-  reason          String?
-  status          String   @default("PENDING") // PENDING | APPROVED | DENIED | CANCELLED
-  reviewedBy      String?
-  reviewedAt      DateTime?
-  denialReason    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  worker          Worker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@index([workerId, status])
-  @@index([status, startDate])
-}
-
-model ShiftSchedule {
-  id              String   @id @default(cuid())
-  workerId        String
-  date            DateTime
-  startTime       String   // "08:00"
-  endTime         String   // "17:00"
-  type            String   @default("REGULAR") // REGULAR | ON_CALL | OVERTIME | TRAINING
-  zone            String?
-  status          String   @default("SCHEDULED") // SCHEDULED | CONFIRMED | COMPLETED | NO_SHOW | SWAPPED
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  worker          Worker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@unique([workerId, date, startTime])
-  @@index([date, status])
-  @@index([workerId, date])
-}
-
-model WorkerPerformanceScore {
-  id              String   @id @default(cuid())
-  workerId        String
-  period          String   // e.g. "2026-07"
-  overallScore    Float    // 0..100
-  punctualityScore Float
-  qualityScore    Float
-  productivityScore Float
-  customerScore   Float
-  teamScore       Float
-  trend           String   @default("STABLE") // UP | DOWN | STABLE
-  factorsJson     String?
-  computedAt      DateTime @default(now())
-
-  worker          Worker  @relation(fields: [workerId], references: [id], onDelete: Cascade)
-
-  @@unique([workerId, period])
-  @@index([period, overallScore])
-}
-
-// ----------------------------------------------------------------------------
-//  EVENT-SOURCED ANALYTICS
-//  (Append-only event log + materialized projections)
-// ----------------------------------------------------------------------------
-
-model AnalyticsEvent {
-  id              String   @id @default(cuid())
-  aggregateType   String   // BOOKING | CUSTOMER | WORKER | REVENUE | PROTOCOL | CONTRACT
-  aggregateId     String
-  eventType       String   // e.g. "booking.completed", "payment.captured"
-  version         Int      // monotonic per aggregate
-  payloadJson     String
-  metadataJson    String?  // { actorId, actorType, ipAddress, userAgent, correlationId }
-  occurredAt      DateTime @default(now())
-  recordedAt      DateTime @default(now())
-
-  @@index([aggregateType, aggregateId, version])
-  @@index([aggregateType, eventType, occurredAt])
-  @@index([occurredAt])
-}
-
-model AnalyticsProjection {
-  id              String   @id @default(cuid())
-  projectionName  String   // e.g. "monthly_revenue", "worker_utilization", "customer_retention"
-  aggregateKey    String   // e.g. "2026-07" or "worker:abc123"
-  valueJson       String   // materialized value
-  lastEventId     String?  // last AnalyticsEvent.id processed
-  lastEventVersion Int?
-  computedAt      DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@unique([projectionName, aggregateKey])
-  @@index([projectionName])
-}
-
-model AnalyticsQuery {
-  id              String   @id @default(cuid())
-  name            String
-  description     String?
-  queryType       String   // TIME_SERIES | COHORT | FUNNEL | TOP_N | COMPARISON
-  dataSource      String   // ANALYTICS_EVENT | PROJECTION | DB_VIEW
-  configJson      String   // { metric, dimensions, filters, timeRange }
-  isPublic        Boolean  @default(false)
-  createdBy       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@index([queryType, isPublic])
-}
-
-model AnalyticsQueryRun {
-  id              String   @id @default(cuid())
-  queryId         String?
-  queryConfigJson String   // snapshot of the query config at run time
-  resultJson      String?
-  rowcount        Int      @default(0)
-  durationMs      Int      @default(0)
-  runBy           String?
-  runAt           DateTime @default(now())
-
-  @@index([queryId, runAt])
-}
-
-// ----------------------------------------------------------------------------
-//  AI-READY DATA STRUCTURES
-//  (Prompt templates, model configs, embeddings, agent runs, predictions)
-// ----------------------------------------------------------------------------
-
-model AiPromptTemplate {
-  id              String   @id @default(cuid())
-  key             String   @unique // e.g. "support.triage", "demand.forecast"
-  name            String
-  description     String?
-  systemPrompt    String
-  userPromptTemplate String // with {{variables}}
-  variablesJson   String   // [{ name, type, required, default }]
-  model           String   @default("gpt-4o-mini")
-  temperature     Float    @default(0.3)
-  maxTokens       Int      @default(1024)
-  isActive        Boolean  @default(true)
-  version         Int      @default(1)
-  createdBy       String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  runs            AiAgentRun[]
-  embeddings      AiEmbedding[]
-}
-
-model AiModelConfig {
-  id              String   @id @default(cuid())
-  provider        String   // OPENAI | ANTHROPIC | LOCAL | ZAI
-  modelId         String
-  displayName     String
-  contextWindow   Int      @default(128000)
-  inputCostPer1kMinor Int  @default(0)
-  outputCostPer1kMinor Int @default(0)
-  capabilities    String[] @default([]) // TEXT | VISION | FUNCTION_CALLING | JSON_MODE | EMBEDDINGS
-  isActive        Boolean  @default(true)
-  metadataJson    String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@unique([provider, modelId])
-}
-
-model AiEmbedding {
-  id              String   @id @default(cuid())
-  entityType      String   // KB_ARTICLE | CUSTOMER | WORKER | BOOKING | PROTOCOL
-  entityId        String
-  promptTemplateId String?
-  embeddingModel  String   @default("text-embedding-3-small")
-  dimensions      Int      @default(1536)
-  vectorJson      String   // JSON-serialized Float[] (portable; switch to pgvector later)
-  chunkIndex      Int      @default(0)
-  chunkText       String
-  metadataJson    String?
-  createdAt       DateTime @default(now())
-
-  promptTemplate  AiPromptTemplate? @relation(fields: [promptTemplateId], references: [id])
-
-  @@index([entityType, entityId])
-  @@index([entityType])
-}
-
-model AiAgentRun {
-  id              String   @id @default(cuid())
-  agentType       String   // SUPPORT_TRIAGE | DISPATCH_OPTIMIZER | DEMAND_FORECAST | QA_PREDICTOR | INVENTORY_FORECAST
-  promptTemplateId String?
-  triggerEventId  String?  // AnalyticsEvent id that triggered this run
-  inputJson       String   // variables + context
-  outputJson      String?  // model response
-  status          String   @default("PENDING") // PENDING | RUNNING | COMPLETED | FAILED | TIMEOUT
-  modelUsed       String?
-  promptTokens    Int      @default(0)
-  completionTokens Int     @default(0)
-  totalCostMinor  Int      @default(0)
-  latencyMs       Int      @default(0)
-  errorMessage    String?
-  startedAt       DateTime?
-  completedAt     DateTime?
-  createdAt       DateTime @default(now())
-
-  promptTemplate  AiPromptTemplate? @relation(fields: [promptTemplateId], references: [id])
-
-  @@index([agentType, status])
-  @@index([status, createdAt])
-}
-
-model AiPrediction {
-  id              String   @id @default(cuid())
-  predictionType  String   // DEMAND_FORECAST | CHURN_RISK | QA_SCORE | DISPATCH_OPTIMAL | INVENTORY_REORDER
-  entityType      String   // CUSTOMER | WORKER | SERVICE_TYPE | INVENTORY_ITEM | ZONE
-  entityId        String
-  predictedValue  Float
-  confidence      Float    // 0..1
-  horizonDays     Int      @default(7)
-  modelVersion    String?
-  featuresJson    String?
-  actualValue     Float?   // populated when the predicted event happens
-  accuracyScore   Float?   // populated post-hoc
-  generatedAt     DateTime @default(now())
-  resolvedAt      DateTime?
-
-  @@index([predictionType, entityType, entityId])
-  @@index([generatedAt])
-}
-
-model AiWorkflowAdapter {
-  id              String   @id @default(cuid())
-  workflowActionId String? // optional link to WorkflowAction
-  agentType       String
-  promptTemplateKey String?
-  triggerConditionsJson String?
-  outputMappingJson String? // how to map AI output back to entity fields
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  @@index([agentType, isActive])
-}
-
-// ============================================================================
-//  MILESTONE 3 — ARCHITECTURAL FOUNDATIONS
-//  1. Multi-Tenancy (Organization → Branch → Area)
-//  2. Geographic Intelligence (Country → Region → City → District → Neighborhood → Zone → ServiceArea)
-//  3. Property Digital Twin (Property → Room → Surface → Appliance → Furniture → Photo → Timeline)
-//  4. Configurable Workflow Engine v2 (Stage → Task → Checklist → RequiredSkill → RequiredProduct → ApprovalRule → QualityGate)
-//  5. Dynamic Pricing Engine (PricingRule + PricingFactor + compute function)
-// ============================================================================
-
-// ----------------------------------------------------------------------------
-//  MULTI-TENANCY
-//  Organization is the top-level tenant. Eks-Clean itself is one Organization.
-//  Future: other cleaning/laundry/waste/facilities companies become their own Orgs.
-// ----------------------------------------------------------------------------
 
 model Organization {
   id              String   @id @default(cuid())
   code            String   @unique
   name            String
   legalName       String?
-  taxId           String?
-  billingEmail    String?
-  billingPhone    String?
-  address         String?
-  country         String?
-  currency        String   @default("GHS")
-  timezone        String   @default("Africa/Accra")
+  currency        String   @default("USD")
+  timezone        String   @default("UTC")
   locale          String   @default("en")
-  status          String   @default("ACTIVE") // ACTIVE | SUSPENDED | TERMINATED
-  plan            String   @default("STARTER") // STARTER | GROWTH | ENTERPRISE
-  trialEndsAt     DateTime?
+  status          String   @default("ACTIVE")
+  plan            String   @default("STARTER")
+  environment     String   @default("PRODUCTION") // SANDBOX | PRODUCTION
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   branches        Branch[]
-  areas           Area[]
   users           User[]
-  customers       Customer[]
-  workers         Worker[]
-  serviceTypes    ServiceType[]
-  bookings        Booking[]
-  subscriptions   Subscription[]
-  inventoryItems  InventoryItem[]
-  vehicles        Vehicle[]
-  contracts       EnterpriseContract[]
-  suppliers       Supplier[]
-  geoZones        GeoZone[]
-  pricingRules    PricingRule[]
-  properties      Property[]
-  workflows       WorkflowDefinitionV2[]
-  // Milestone 4
-  enterprises     Enterprise[]
-  workOrders      WorkOrder[]
-  assets          Asset[]
+  resources       Resource[]
+  capabilities    Capability[]
+  intents         Intent[]
+  executionPlans  ExecutionPlan[]
+  workflows       WorkflowDefinition[]
   rules           Rule[]
+  policies        Policy[]
+  marketplaces    Marketplace[]
+  offers          Offer[]
+  reservations    Reservation[]
+  schedules       Schedule[]
+  routes          Route[]
+  recommendations Recommendation[]
+  projections     Projection[]
+  protocols       ProtocolInstallation[]
+  extensions      ExtensionInstallation[]
+  demands         Demand[]
+  events          Event[]
+  apiKeys         ApiKey[]
+  secrets         Secret[]
+  featureFlags    FeatureFlag[]
 }
 
 model Branch {
@@ -2479,922 +95,388 @@ model Branch {
   organizationId  String
   code            String
   name            String
-  address         String?
-  phone           String?
-  managerUserId   String?  // User id of branch manager
+  parentBranchId  String?
   status          String   @default("ACTIVE")
   createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
 
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  areas           Area[]
+  parent          Branch?      @relation("BranchHierarchy", fields: [parentBranchId], references: [id])
+  children        Branch[]     @relation("BranchHierarchy")
 
   @@unique([organizationId, code])
-  @@index([organizationId, status])
 }
 
-model Area {
+model RefreshToken {
+  id          String   @id @default(cuid())
+  userId      String
+  tokenHash   String   @unique
+  expiresAt   DateTime
+  revokedAt   DateTime?
+  createdAt   DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
+}
+
+model ApiKey {
   id              String   @id @default(cuid())
   organizationId  String
-  branchId        String?
-  code            String
+  userId          String?
   name            String
+  keyHash         String   @unique
+  keyPrefix       String
+  scopes          String[] @default([])
+  expiresAt       DateTime?
+  lastUsedAt      DateTime?
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user            User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  @@index([organizationId])
+}
+
+model Secret {
+  id              String   @id @default(cuid())
+  organizationId  String
+  key             String
+  encryptedValue  String
   description     String?
-  geoZoneId       String?
-  managerUserId   String?
-  status          String   @default("ACTIVE")
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  branch          Branch?     @relation(fields: [branchId], references: [id])
-
-  @@unique([organizationId, code])
-  @@index([organizationId, status])
+  @@unique([organizationId, key])
 }
 
-// ----------------------------------------------------------------------------
-//  GEOGRAPHIC INTELLIGENCE
-//  Full hierarchy: Country → Region → City → District → Neighborhood → Zone → ServiceArea
-//  Plus: TravelPolygon, CoverageRadius, TrafficModel, PricingZone, DemandScore
-// ----------------------------------------------------------------------------
-
-model GeoCountry {
-  id              String   @id @default(cuid())
-  code            String   @unique  // ISO 3166-1 alpha-2 (e.g. "GH")
-  name            String
-  currency        String   @default("GHS")
-  phoneCode       String?  // "+233"
-  timezone        String?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  regions         GeoRegion[]
-}
-
-model GeoRegion {
-  id              String   @id @default(cuid())
-  countryId       String
-  code            String
-  name            String
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  country         GeoCountry @relation(fields: [countryId], references: [id], onDelete: Cascade)
-  cities          GeoCity[]
-
-  @@unique([countryId, code])
-}
-
-model GeoCity {
-  id              String   @id @default(cuid())
-  regionId        String
-  code            String
-  name            String
-  latitude        Float?
-  longitude       Float?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  region          GeoRegion @relation(fields: [regionId], references: [id], onDelete: Cascade)
-  districts       GeoDistrict[]
-
-  @@unique([regionId, code])
-}
-
-model GeoDistrict {
-  id              String   @id @default(cuid())
-  cityId          String
-  code            String
-  name            String
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  city            GeoCity @relation(fields: [cityId], references: [id], onDelete: Cascade)
-  neighborhoods   GeoNeighborhood[]
-
-  @@unique([cityId, code])
-}
-
-model GeoNeighborhood {
-  id              String   @id @default(cuid())
-  districtId      String
-  code            String
-  name            String
-  latitude        Float?
-  longitude       Float?
-  createdAt       DateTime @default(now())
-
-  district        GeoDistrict @relation(fields: [districtId], references: [id], onDelete: Cascade)
-  zones           GeoZone[]
-
-  @@unique([districtId, code])
-}
-
-model GeoZone {
-  id              String   @id @default(cuid())
-  organizationId  String?
-  neighborhoodId  String?
-  code            String
-  name            String
-  description     String?
-  // Travel polygon as GeoJSON — array of [lat, lon] coordinates
-  polygonJson     String?  // {"type":"Polygon","coordinates":[[[lon,lat],...]]}
-  // Coverage radius in km (alternative to polygon)
-  coverageRadiusKm Float?
-  centerLatitude  Float?
-  centerLongitude Float?
-  // Traffic model: average speed (km/h) by time-of-day
-  trafficModelJson String? // {"off_peak":35,"morning_peak":18,"evening_peak":15,"night":40}
-  // Demand score 0..1 for this zone
-  demandScore     Float    @default(0.5)
-  // Pricing multiplier for this zone (e.g. 1.2 for premium areas)
-  pricingMultiplier Float  @default(1.0)
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  organization    Organization? @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  neighborhood    GeoNeighborhood? @relation(fields: [neighborhoodId], references: [id])
-  serviceAreas    GeoServiceArea[]
-
-  @@index([organizationId, isActive])
-  @@index([neighborhoodId])
-}
-
-model GeoServiceArea {
-  id              String   @id @default(cuid())
-  zoneId          String
-  code            String
-  name            String
-  // Worker assignment rules for this service area
-  defaultWorkerPool String? // comma-separated worker ids
-  estimatedTravelMin Int?
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  zone            GeoZone @relation(fields: [zoneId], references: [id], onDelete: Cascade)
-
-  @@unique([zoneId, code])
-}
-
-// ----------------------------------------------------------------------------
-//  PROPERTY DIGITAL TWIN
-//  Property → Room → Surface → Appliance → Furniture → Photo → Timeline
-//  Replaces/augments the minimal HouseholdProfile
-// ----------------------------------------------------------------------------
-
-model Property {
+model FeatureFlag {
   id              String   @id @default(cuid())
   organizationId  String
-  customerId      String
-  name            String   // "Main House", "Apartment B"
-  propertyType    String   @default("HOUSE") // HOUSE | APARTMENT | OFFICE | STUDIO | TOWNHOUSE | VILLA
-  addressId       String?
-  geoZoneId       String?
-  // Structural
-  bedrooms        Int      @default(1)
-  bathrooms       Int      @default(1)
-  squareMeters    Float?
-  floors          Int      @default(1)
-  yearBuilt       Int?
-  // Characteristics
-  hasPets         Boolean  @default(false)
-  petDetails      String?
-  hasChildren     Boolean  @default(false)
-  accessNotes     String?
-  parkingAvailable Boolean @default(false)
-  // Digital twin metadata
-  lastCleanedAt   DateTime?
-  nextRecommendedCleanAt DateTime?
-  cleanlinessScore Float?  // 0..100, computed from history
-  // Config
-  preferredProducts String? // comma-separated product ids
-  specialInstructions String?
-  status          String   @default("ACTIVE")
-  createdAt       DateTime @default(now())
+  key             String
+  description     String?
+  enabled         Boolean  @default(false)
+  rolloutPercent  Int      @default(0)
+  targetRoles     String?
+  configJson      String?
   updatedAt       DateTime @updatedAt
 
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  customer        Customer     @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  rooms           Room[]
-  appliances      Appliance[]
-  photos          PropertyPhoto[]
-  timeline        PropertyTimelineEvent[]
-  cleaningHistory PropertyCleaningRecord[]
-
-  @@index([organizationId, customerId])
-  @@index([geoZoneId])
+  @@unique([organizationId, key])
 }
 
-model Room {
+// ============================================================================
+//  EVENT STORE — immutable, append-only (CQRS write side)
+// ============================================================================
+
+model Event {
   id              String   @id @default(cuid())
-  propertyId      String
-  name            String   // "Master Bedroom", "Kitchen"
-  roomType        String   @default("BEDROOM") // BEDROOM | BATHROOM | KITCHEN | LIVING_ROOM | DINING | OFFICE | GARAGE | BALCONY | OTHER
-  floor           Int      @default(1)
-  areaSqM         Float?
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  surfaces        Surface[]
-  furniture       Furniture[]
-
-  @@index([propertyId])
-}
-
-model Surface {
-  id              String   @id @default(cuid())
-  roomId          String
-  surfaceType     String   // MARBLE | GRANITE | WOOD | LAMINATE | LEATHER | FABRIC | GLASS | TILES | ELECTRONICS | CARPET | OTHER
-  location        String?  // "Floor", "Countertop", "Wall"
-  areaSqM         Float?
-  condition       String   @default("GOOD") // EXCELLENT | GOOD | FAIR | POOR
-  lastTreatedAt   DateTime?
-  notes           String?
-  createdAt       DateTime @default(now())
-
-  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-
-  @@index([roomId])
-}
-
-model Furniture {
-  id              String   @id @default(cuid())
-  roomId          String
-  name            String   // "Sofa", "Dining table"
-  material        String?  // WOOD | LEATHER | FABRIC | METAL | GLASS
-  quantity        Int      @default(1)
-  condition       String   @default("GOOD")
-  notes           String?
-  createdAt       DateTime @default(now())
-
-  room            Room      @relation(fields: [roomId], references: [id], onDelete: Cascade)
-
-  @@index([roomId])
-}
-
-model Appliance {
-  id              String   @id @default(cuid())
-  propertyId      String
-  name            String   // "Refrigerator", "Washing machine"
-  brand           String?
-  model           String?
-  location        String?  // "Kitchen"
-  purchaseDate    DateTime?
-  lastServicedAt  DateTime?
-  warrantyExpiry  DateTime?
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-
-  @@index([propertyId])
-}
-
-model PropertyPhoto {
-  id              String   @id @default(cuid())
-  propertyId      String
-  roomId          String?
-  url             String
-  caption         String?
-  photoType       String   @default("GENERAL") // GENERAL | BEFORE | AFTER | DAMAGE | INSPECTION
-  takenAt         DateTime @default(now())
-  takenBy         String?
-  createdAt       DateTime @default(now())
-
-  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-
-  @@index([propertyId])
-}
-
-model PropertyTimelineEvent {
-  id              String   @id @default(cuid())
-  propertyId      String
-  eventType       String   // CLEANED | CARPET_CLEANED | LAUNDRY_PICKUP | TRASH_COLLECTED | WINDOW_CLEANED | DEEP_CLEAN | INSPECTION | COMPLAINT | RATING | INVOICE | REPAIR | MAINTENANCE
-  title           String
-  description     String?
-  bookingId       String?
-  workerId        String?
+  organizationId  String
+  aggregateType   String   // RESOURCE | DEMAND | INTENT | EXECUTION_PLAN | WORKFLOW | etc.
+  aggregateId     String
+  eventType       String
+  version         Int      // monotonic per aggregate
+  payloadJson     String
+  metadataJson    String?  // { actorId, actorType, correlationId, causationId, clockTick }
   occurredAt      DateTime @default(now())
+  recordedAt      DateTime @default(now())
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId, aggregateType, aggregateId, version])
+  @@index([organizationId, eventType, occurredAt])
+  @@index([occurredAt])
+}
+
+// ============================================================================
+//  READ MODELS / PROJECTIONS (CQRS read side)
+// ============================================================================
+
+model Projection {
+  id              String   @id @default(cuid())
+  organizationId  String
+  projectionName  String   // e.g. "resource_summary", "demand_pipeline", "execution_metrics"
+  aggregateKey    String
+  valueJson       String
+  lastEventId     String?
+  lastEventVersion Int?
+  computedAt      DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, projectionName, aggregateKey])
+  @@index([organizationId, projectionName])
+}
+
+// ============================================================================
+//  RUNTIME CLOCK — deterministic time abstraction
+// ============================================================================
+
+model RuntimeClock {
+  id              String   @id @default(cuid())
+  organizationId  String
+  mode            String   @default("WALL") // WALL | SIMULATION | FIXED
+  currentTick     BigInt   @default(0)      // monotonic tick counter
+  simulatedTime   DateTime?
+  tickDurationMs  Int      @default(1000)   // 1 tick = 1 second by default
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([organizationId])
+}
+
+// ============================================================================
+//  RESOURCES — everything that performs or consumes work
+// ============================================================================
+
+model Resource {
+  id              String   @id @default(cuid())
+  organizationId  String
+  code            String
+  name            String
+  resourceType    String   // WORKER | VEHICLE | EQUIPMENT | INVENTORY | WAREHOUSE | PARTNER | SUPPLIER | ROBOT | IOT_DEVICE | AI_AGENT | EXTERNAL_API
+  status          String   @default("ACTIVE") // ACTIVE | INACTIVE | MAINTENANCE | RETIRED
+  // Digital twin
+  twinJson        String?  // full digital twin snapshot
+  metadataJson    String?  // free-form attributes
+  // Location
+  latitude        Float?
+  longitude       Float?
+  geoZoneId       String?
+  // Hierarchy
+  parentResourceId String?
+  // Capacity
+  capacityJson    String?  // { maxConcurrent, maxPerDay, units, utilization }
+  // Ownership
+  providerId      String?  // who owns/provides this resource
+  costModelJson   String?  // { hourly, perUse, perUnit }
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  parent          Resource?    @relation("ResourceHierarchy", fields: [parentResourceId], references: [id])
+  children        Resource[]   @relation("ResourceHierarchy")
+  capabilities    Capability[]
+  reservations    Reservation[]
+  schedules       Schedule[]
+  routeStops      RouteStop[]
+
+  @@unique([organizationId, code])
+  @@index([organizationId, resourceType, status])
+}
+
+// ============================================================================
+//  CAPABILITY REGISTRY
+// ============================================================================
+
+model Capability {
+  id              String   @id @default(cuid())
+  organizationId  String
+  code            String
+  name            String
+  version         String   @default("1.0.0")
+  description     String?
+  // Requirements
+  requiredResources String? // JSON: types of resources needed
+  requiredSkills  String?   // JSON: skill codes + min levels
+  constraintsJson String?   // JSON: time, location, capacity constraints
+  // Interface
+  inputsJson      String?   // JSON: input schema
+  outputsJson     String?   // JSON: output schema
+  // Economics
+  costModelJson   String?   // JSON: { baseCost, perUnit, perMinute }
+  qualityMetricsJson String? // JSON: { sla, accuracy, reliability }
+  // Runtime
+  runtimeMetadataJson String? // JSON: { protocol, extension, handler }
+  isActive        Boolean  @default(true)
+  protocolId      String?  // which protocol registered this
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  resource        Resource?    @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  resourceId      String?
+
+  @@unique([organizationId, code, version])
+}
+
+// ============================================================================
+//  DEMAND → INTENT → EXECUTION (universal lifecycle)
+// ============================================================================
+
+model Demand {
+  id              String   @id @default(cuid())
+  organizationId  String
+  code            String   @unique
+  source          String   @default("EXTERNAL") // EXTERNAL | INTERNAL | RECURRING | MARKETPLACE
+  // What is being demanded
+  capabilityCode  String?  // requested capability
+  quantity        Float    @default(1)
+  constraintsJson String?  // JSON: time, location, quality, budget
+  // Who
+  customerId      String?  // requesting entity (protocol-specific)
+  // Status in lifecycle
+  status          String   @default("DETECTED") // DETECTED | INTENT_CREATED | VALIDATED | PLANNED | EXECUTING | COMPLETED | FAILED | CANCELLED
+  priority        String   @default("NORMAL")   // LOW | NORMAL | HIGH | URGENT | CRITICAL
+  // Links
+  intentId        String?  @unique
+  executionPlanId String?  @unique
+  // Metadata
   metadataJson    String?
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-
-  @@index([propertyId, occurredAt])
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  // Relations are defined on the other side (Intent, ExecutionPlan)
+  intent          Intent?
+  @@index([organizationId, status])
+  @@index([organizationId, priority])
 }
 
-model PropertyCleaningRecord {
+model Intent {
   id              String   @id @default(cuid())
-  propertyId      String
-  bookingId       String?
-  cleanedAt       DateTime
-  durationMin     Int
-  roomsCleaned    Int
-  productsUsed    String?  // JSON array of {itemId, quantity}
-  issuesFound     String?  // JSON array
-  qualityScore    Float?   // 0..100
-  notes           String?
+  organizationId  String
+  code            String   @unique
+  demandId        String?  @unique
+  // Intent definition (from Protocol SDK)
+  intentKey       String   // e.g. "schedule_service", "request_quote" — defined by protocol
+  intentVersion   String   @default("1.0.0")
+  // Compiled intent
+  parametersJson  String   // validated input parameters
+  // Validation
+  validationStatus String  @default("PENDING") // PENDING | VALID | INVALID
+  validationErrors String?
+  // Policy evaluation
+  policyStatus    String   @default("PENDING") // PENDING | ALLOWED | DENIED | CONDITIONAL
+  policyDecisionsJson String?
+  // Capability resolution
+  resolutionStatus String  @default("PENDING") // PENDING | RESOLVED | UNRESOLVED
+  resolvedCapabilitiesJson String?
+  // Resource allocation
+  allocationStatus String  @default("PENDING") // PENDING | ALLOCATED | PARTIAL | FAILED
+  allocatedResourcesJson String?
+  // Scheduling
+  schedulingStatus String  @default("PENDING") // PENDING | SCHEDULED | CONFLICT | FAILED
+  scheduledStart  DateTime?
+  scheduledEnd    DateTime?
+  // Routing
+  routingStatus   String   @default("PENDING") // PENDING | ROUTED | OPTIMIZED | FAILED
+  routeId         String?
+  // Execution plan
+  planStatus      String   @default("PENDING") // PENDING | PLANNED | FAILED
+  executionPlanId String?  @unique
+  // Metadata
+  protocolId      String?
+  metadataJson    String?
   createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  property        Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-
-  @@index([propertyId, cleanedAt])
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  demand          Demand?      @relation(fields: [demandId], references: [id])
+  @@index([organizationId, intentKey, validationStatus])
 }
 
-// ----------------------------------------------------------------------------
-//  CONFIGURABLE WORKFLOW ENGINE v2
-//  Workflow → Stage → Task → Checklist → RequiredSkill → RequiredProduct → ApprovalRule → QualityGate
-// ----------------------------------------------------------------------------
+model ExecutionPlan {
+  id              String   @id @default(cuid())
+  organizationId  String
+  code            String   @unique
+  intentId        String?  @unique
+  demandId        String?  @unique
+  // Plan structure
+  planJson        String   // full execution plan (stages, tasks, resources, schedule)
+  // Execution
+  status          String   @default("PLANNED") // PLANNED | APPROVED | EXECUTING | PAUSED | COMPLETED | FAILED | CANCELLED
+  // Timeline
+  plannedStart    DateTime?
+  plannedEnd      DateTime?
+  actualStart     DateTime?
+  actualEnd       DateTime?
+  // Resources
+  allocatedResourcesJson String?
+  // Quality
+  qualityScore    Float?
+  // Financials
+  estimatedCostMinor Int   @default(0)
+  actualCostMinor Int      @default(0)
+  // Determinism
+  runtimeTick     BigInt?
+  deterministic   Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-model WorkflowDefinitionV2 {
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  tasks           Task[]
+  observations    Observation[]
+  @@index([organizationId, status])
+}
+
+model Task {
+  id              String   @id @default(cuid())
+  executionPlanId String
+  order           Int
+  title           String
+  description     String?
+  status          String   @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | SKIPPED | FAILED
+  assignedResourceId String?
+  estimatedDurationMin Int?
+  actualDurationMin Int?
+  requiresPhoto   Boolean  @default(false)
+  checklistJson   String?  // [{ item, checked }]
+  qualityGatesJson String?
+  completionRulesJson String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  notes           String?
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  executionPlan   ExecutionPlan @relation(fields: [executionPlanId], references: [id], onDelete: Cascade)
+  @@index([executionPlanId, order])
+}
+
+model Observation {
+  id              String   @id @default(cuid())
+  executionPlanId String
+  taskId          String?
+  observedBy      String?
+  observationType String   @default("PROGRESS") // PROGRESS | QUALITY | SAFETY | COMPLETION | ISSUE
+  value           Float?
+  unit            String?
+  notes           String?
+  photoUrls       String?
+  observedAt      DateTime @default(now())
+  metadataJson    String?
+
+  executionPlan   ExecutionPlan @relation(fields: [executionPlanId], references: [id], onDelete: Cascade)
+  @@index([executionPlanId, observedAt])
+}
+
+// ============================================================================
+//  WORKFLOW ENGINE — configurable, no hardcoded workflows
+// ============================================================================
+
+model WorkflowDefinition {
   id              String   @id @default(cuid())
   organizationId  String
   key             String
   name            String
   description     String?
-  serviceTypeId   String?  // optional: bind to a specific service
-  entityType      String   @default("BOOKING")
+  entityType      String   @default("EXECUTION_PLAN")
   version         Int      @default(1)
   isActive        Boolean  @default(true)
+  stagesJson      String   // [{ order, name, type, tasks: [{ title, checklist, qualityGates, requiredSkills, requiredResources }] }]
+  approvalRulesJson String?
+  completionRulesJson String?
   estimatedDurationMin Int?
+  protocolId      String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  stages          WorkflowStage[]
-
   @@unique([organizationId, key])
   @@index([organizationId, isActive])
 }
 
-model WorkflowStage {
-  id              String   @id @default(cuid())
-  workflowId      String
-  order           Int
-  name            String
-  description     String?
-  stageType       String   @default("EXECUTION") // PREPARATION | EXECUTION | REVIEW | HANDOVER | POST_SERVICE
-  estimatedDurationMin Int?
-  isRequired      Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  workflow        WorkflowDefinitionV2 @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  tasks           WorkflowTask[]
-
-  @@index([workflowId, order])
-}
-
-model WorkflowTask {
-  id              String   @id @default(cuid())
-  stageId         String
-  order           Int
-  title           String
-  description     String?
-  estimatedDurationMin Int?
-  isRequired      Boolean  @default(true)
-  requiresPhoto   Boolean  @default(false)
-  createdAt       DateTime @default(now())
-
-  stage           WorkflowStage  @relation(fields: [stageId], references: [id], onDelete: Cascade)
-  checklists      WorkflowChecklist[]
-  requiredSkills  WorkflowRequiredSkill[]
-  requiredProducts WorkflowRequiredProduct[]
-  approvalRules   WorkflowApprovalRule[]
-  qualityGates    WorkflowQualityGate[]
-
-  @@index([stageId, order])
-}
-
-model WorkflowChecklist {
-  id              String   @id @default(cuid())
-  taskId          String
-  item            String
-  isRequired      Boolean  @default(true)
-  order           Int      @default(0)
-  createdAt       DateTime @default(now())
-
-  task            WorkflowTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
-
-  @@index([taskId])
-}
-
-model WorkflowRequiredSkill {
-  id              String   @id @default(cuid())
-  taskId          String
-  skillCode       String
-  minLevel        Int      @default(1)
-  createdAt       DateTime @default(now())
-
-  task            WorkflowTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
-
-  @@unique([taskId, skillCode])
-}
-
-model WorkflowRequiredProduct {
-  id              String   @id @default(cuid())
-  taskId          String
-  itemId          String?
-  productCode     String?  // fallback if item not in inventory
-  quantity        Float    @default(1)
-  unit            String   @default("UNIT")
-  createdAt       DateTime @default(now())
-
-  task            WorkflowTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
-
-  @@index([taskId])
-}
-
-model WorkflowApprovalRule {
-  id              String   @id @default(cuid())
-  taskId          String
-  approverRole    String   // FIELD_MANAGER | ADMIN | CUSTOMER
-  approverUserId  String?
-  autoApproveIfScoreGte Float? // auto-approve if quality score ≥ this
-  createdAt       DateTime @default(now())
-
-  task            WorkflowTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
-
-  @@index([taskId])
-}
-
-model WorkflowQualityGate {
-  id              String   @id @default(cuid())
-  taskId          String
-  metric          String   // PHOTO_REQUIRED | CHECKLIST_COMPLETE | QUALITY_SCORE | CUSTOMER_SIGNOFF | DURATION_WITHIN_RANGE
-  threshold       Float?
-  failureAction   String   @default("BLOCK") // BLOCK | WARN | REWORK
-  createdAt       DateTime @default(now())
-
-  task            WorkflowTask  @relation(fields: [taskId], references: [id], onDelete: Cascade)
-
-  @@index([taskId])
-}
-
-// ----------------------------------------------------------------------------
-//  DYNAMIC PRICING ENGINE
-//  PricingRule + PricingFactor → compute dynamic quote
-// ----------------------------------------------------------------------------
-
-model PricingRule {
-  id              String   @id @default(cuid())
-  organizationId  String
-  serviceTypeId   String
-  name            String
-  description     String?
-  priority        Int      @default(100) // lower = higher priority
-  isActive        Boolean  @default(true)
-  // Base
-  basePriceMinor  Int
-  priceUnit       String   @default("PER_HOUR") // PER_HOUR | PER_JOB | PER_SQ_M | PER_KG
-  // Multipliers (all default 1.0 = no change)
-  distanceMultiplier Float  @default(1.0)  // applied per km beyond base radius
-  distanceBaseKm  Float    @default(10)   // free travel radius
-  distancePerKmMinor Int   @default(0)    // charge per km beyond base
-  urgencyMultiplier Float  @default(1.0)  // 1.5 for same-day
-  demandMultiplier Float   @default(1.0)  // dynamic based on zone demand score
-  scarcityMultiplier Float @default(1.0)  // worker scarcity
-  subscriptionDiscount Float @default(0.0) // 0.1 = 10% off for subscribers
-  promotionMultiplier Float @default(1.0) // 0.9 = 10% promo
-  holidayMultiplier Float  @default(1.0)  // 2.0 on holidays
-  nightSurchargeMinor Int  @default(0)    // flat surcharge for night jobs
-  largePropertyMultiplier Float @default(1.0) // 1.2 for >200 sqm
-  largePropertyThreshold Float @default(200) // sqm threshold
-  // Effective dates
-  validFrom       DateTime?
-  validTo         DateTime?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
-  @@index([organizationId, serviceTypeId, isActive])
-}
-
-model PricingQuote {
-  id              String   @id @default(cuid())
-  organizationId  String?
-  customerId      String?
-  serviceTypeId   String?
-  propertyId      String?
-  bookingId       String?
-  basePriceMinor  Int
-  distanceChargeMinor Int  @default(0)
-  urgencyChargeMinor Int   @default(0)
-  demandChargeMinor Int    @default(0)
-  scarcityChargeMinor Int  @default(0)
-  subscriptionDiscountMinor Int @default(0)
-  promotionDiscountMinor Int @default(0)
-  holidayChargeMinor Int   @default(0)
-  nightSurchargeMinor Int  @default(0)
-  largePropertyChargeMinor Int @default(0)
-  finalPriceMinor Int
-  currency        String   @default("GHS")
-  breakdownJson   String   // full breakdown for transparency
-  validUntil      DateTime?
-  createdAt       DateTime @default(now())
-
-  @@index([customerId, createdAt])
-  @@index([bookingId])
-}
-
 // ============================================================================
-//  MILESTONE 4 — ENTERPRISE OPERATIONS LAYER
-//  1. Enterprise Accounts (Enterprise → Departments → Cost Centers → Budgets)
-//  2. Work Orders (generic work engine — cleaning is one type)
-//  3. Asset Registry (buildings, equipment, vehicles with maintenance history)
-//  4. Rules Engine (configurable IF/THEN rules — no code changes for ops teams)
-// ============================================================================
-
-// ----------------------------------------------------------------------------
-//  ENTERPRISE ACCOUNTS
-//  Enterprise → Departments → Cost Centers → Budget Owners → Approvers
-// ----------------------------------------------------------------------------
-
-model Enterprise {
-  id              String   @id @default(cuid())
-  organizationId  String
-  name            String
-  legalName       String?
-  taxId           String?
-  billingEmail    String?
-  billingPhone    String?
-  address         String?
-  industry        String?
-  size            String   @default("MID") // SMALL | MID | LARGE | ENTERPRISE
-  status          String   @default("ACTIVE") // ACTIVE | SUSPENDED | TERMINATED
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  departments     Department[]
-  costCenters     CostCenter[]
-  purchaseOrders  EnterprisePurchaseOrder[]
-  approvers       EnterpriseApprover[]
-  customerLinks   CustomerEnterpriseLink[]
-
-  @@index([organizationId, status])
-}
-
-model Department {
-  id              String   @id @default(cuid())
-  enterpriseId    String
-  parentDepartmentId String? // for nested departments
-  name            String
-  code            String
-  description     String?
-  headUserId      String?  // user id of department head
-  status          String   @default("ACTIVE")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  enterprise      Enterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
-  parent          Department? @relation("DepartmentHierarchy", fields: [parentDepartmentId], references: [id])
-  children        Department[] @relation("DepartmentHierarchy")
-  costCenters     CostCenter[]
-
-  @@unique([enterpriseId, code])
-  @@index([enterpriseId, parentDepartmentId])
-}
-
-model CostCenter {
-  id              String   @id @default(cuid())
-  enterpriseId    String
-  departmentId    String?
-  code            String
-  name            String
-  description     String?
-  budgetAnnualMinor Int    @default(0)
-  spentYtdMinor   Int      @default(0)
-  currency        String   @default("GHS")
-  status          String   @default("ACTIVE")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  enterprise      Enterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
-  department      Department? @relation(fields: [departmentId], references: [id])
-  budgetOwners    BudgetOwner[]
-  purchaseOrders  EnterprisePurchaseOrder[]
-
-  @@unique([enterpriseId, code])
-}
-
-model BudgetOwner {
-  id              String   @id @default(cuid())
-  costCenterId    String
-  userId          String   // user id of the budget owner
-  allocationMinor Int      @default(0)
-  spentMinor      Int      @default(0)
-  approvalLimitMinor Int   @default(0) // can approve POs up to this amount
-  status          String   @default("ACTIVE")
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  costCenter      CostCenter @relation(fields: [costCenterId], references: [id], onDelete: Cascade)
-
-  @@index([costCenterId, status])
-}
-
-model EnterpriseApprover {
-  id              String   @id @default(cuid())
-  enterpriseId    String
-  userId          String
-  approvalLevel   Int      @default(1) // 1 = first-level, 2 = second-level, etc.
-  maxApprovalMinor Int     @default(0) // 0 = unlimited
-  isActive        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  enterprise      Enterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
-
-  @@unique([enterpriseId, userId])
-}
-
-model EnterprisePurchaseOrder {
-  id              String   @id @default(cuid())
-  enterpriseId    String
-  costCenterId    String?
-  code            String   @unique
-  title           String
-  description     String?
-  status          String   @default("DRAFT") // DRAFT | SUBMITTED | APPROVED | REJECTED | FULFILLED | CANCELLED
-  totalMinor      Int      @default(0)
-  currency        String   @default("GHS")
-  requestedBy     String?  // user id
-  requestedAt     DateTime @default(now())
-  approvedBy      String?  // user id
-  approvedAt      DateTime?
-  rejectionReason String?
-  itemsJson       String   // [{ description, quantity, unitPriceMinor, totalMinor }]
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  enterprise      Enterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
-  costCenter      CostCenter? @relation(fields: [costCenterId], references: [id])
-
-  @@index([enterpriseId, status])
-  @@index([costCenterId])
-}
-
-model CustomerEnterpriseLink {
-  id              String   @id @default(cuid())
-  customerId      String
-  enterpriseId    String
-  relationship    String   @default("EMPLOYEE") // EMPLOYEE | CONTRACTOR | DEPARTMENT
-  departmentId    String?
-  costCenterId    String?
-  createdAt       DateTime @default(now())
-
-  enterprise      Enterprise @relation(fields: [enterpriseId], references: [id], onDelete: Cascade)
-
-  @@unique([customerId, enterpriseId])
-}
-
-// ----------------------------------------------------------------------------
-//  WORK ORDERS
-//  Generic work engine — cleaning, maintenance, repairs, inspections all
-//  become work order types. Cleaning bookings can be linked to work orders.
-// ----------------------------------------------------------------------------
-
-model WorkOrder {
-  id              String   @id @default(cuid())
-  organizationId  String
-  code            String   @unique
-  title           String
-  description     String?
-  workOrderType   String   @default("CLEANING") // CLEANING | MAINTENANCE | REPAIR | INSPECTION | INSTALLATION | OTHER
-  status          String   @default("OPEN") // OPEN | ASSIGNED | IN_PROGRESS | ON_HOLD | COMPLETED | CANCELLED | FAILED
-  priority        String   @default("NORMAL") // LOW | NORMAL | HIGH | URGENT | CRITICAL
-  // Links
-  customerId      String?
-  propertyId      String?
-  bookingId       String?
-  enterpriseId    String?
-  costCenterId    String?
-  assetId         String?
-  workflowV2Id    String?  // link to configurable workflow
-  // Assignment
-  assignedWorkerIds String? // comma-separated worker ids
-  assignedManagerId String?
-  // Scheduling
-  scheduledStart  DateTime?
-  scheduledEnd    DateTime?
-  actualStart     DateTime?
-  actualEnd       DateTime?
-  // Financials
-  estimatedCostMinor Int   @default(0)
-  actualCostMinor Int      @default(0)
-  invoiceId       String?
-  currency        String   @default("GHS")
-  // Metadata
-  notes           String?
-  tags            String[] @default([])
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  tasks           WorkOrderTask[]
-  inspections     WorkOrderInspection[]
-  photos          WorkOrderPhoto[]
-  assets          WorkOrderAssetLink[]
-  signOffs        WorkOrderSignOff[]
-  statusHistory   WorkOrderStatusHistory[]
-
-  @@index([organizationId, status])
-  @@index([workOrderType, status])
-  @@index([customerId])
-  @@index([assetId])
-}
-
-model WorkOrderTask {
-  id              String   @id @default(cuid())
-  workOrderId     String
-  order           Int
-  title           String
-  description     String?
-  status          String   @default("PENDING") // PENDING | IN_PROGRESS | COMPLETED | SKIPPED | FAILED
-  assignedWorkerId String?
-  estimatedDurationMin Int?
-  actualDurationMin Int?
-  requiresPhoto   Boolean  @default(false)
-  checklistJson   String?  // [{ item, checked }]
-  completedAt     DateTime?
-  notes           String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
-
-  @@index([workOrderId, order])
-}
-
-model WorkOrderInspection {
-  id              String   @id @default(cuid())
-  workOrderId     String
-  inspectedBy     String?  // user id
-  inspectedAt     DateTime @default(now())
-  inspectionType  String   @default("QUALITY") // QUALITY | SAFETY | COMPLETION | COMPLIANCE
-  score           Float?   // 0..100
-  passed          Boolean  @default(true)
-  findings        String?
-  deficienciesJson String? // [{ area, severity, description, actionRequired }]
-  photoUrls       String?  // JSON array
-  nextAction      String?  // PASS | REWORK | ESCALATE | FAIL
-  createdAt       DateTime @default(now())
-
-  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
-
-  @@index([workOrderId, inspectedAt])
-}
-
-model WorkOrderPhoto {
-  id              String   @id @default(cuid())
-  workOrderId     String
-  taskId          String?
-  url             String
-  caption         String?
-  photoType       String   @default("GENERAL") // GENERAL | BEFORE | AFTER | DAMAGE | DEFICIENCY | COMPLETION
-  takenBy         String?  // user id
-  takenAt         DateTime @default(now())
-  createdAt       DateTime @default(now())
-
-  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
-
-  @@index([workOrderId, photoType])
-}
-
-model WorkOrderAssetLink {
-  id              String   @id @default(cuid())
-  workOrderId     String
-  assetId         String
-  relationship    String   @default("SERVICED") // SERVICED | INSPECTED | REPAIRED | INSTALLED | REMOVED
-  notes           String?
-  createdAt       DateTime @default(now())
-
-  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
-  asset           Asset     @relation(fields: [assetId], references: [id], onDelete: Cascade)
-
-  @@unique([workOrderId, assetId])
-}
-
-model WorkOrderSignOff {
-  id              String   @id @default(cuid())
-  workOrderId     String
-  signedBy        String   // user id
-  signerRole      String   // WORKER | MANAGER | CUSTOMER | INSPECTOR
-  signedAt        DateTime @default(now())
-  signature       String?  // base64 or hash
-  comments        String?
-  approved        Boolean  @default(true)
-  createdAt       DateTime @default(now())
-
-  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
-
-  @@index([workOrderId, signerRole])
-}
-
-model WorkOrderStatusHistory {
-  id              String   @id @default(cuid())
-  workOrderId     String
-  fromStatus      String?
-  toStatus        String
-  changedBy       String?  // user id
-  changedByType   String?  // SYSTEM | WORKER | MANAGER | CUSTOMER
-  reason          String?
-  createdAt       DateTime @default(now())
-
-  workOrder       WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
-
-  @@index([workOrderId, createdAt])
-}
-
-// ----------------------------------------------------------------------------
-//  ASSET REGISTRY
-//  Buildings, floors, rooms, equipment, HVAC, furniture, vehicles — everything
-//  with maintenance history. Assets can be nested (building → floor → room → equipment).
-// ----------------------------------------------------------------------------
-
-model Asset {
-  id              String   @id @default(cuid())
-  organizationId  String
-  parentAssetId   String?  // for nesting: building → floor → room → equipment
-  code            String
-  name            String
-  assetType       String   // BUILDING | FLOOR | ROOM | EQUIPMENT | HVAC | FURNITURE | VEHICLE | APPLIANCE | FIXTURE | OTHER
-  description     String?
-  // Location
-  propertyId      String?
-  location        String?
-  latitude        Float?
-  longitude       Float?
-  // Identification
-  serialNumber    String?
-  manufacturer    String?
-  model           String?
-  yearAcquired    Int?
-  purchaseCostMinor Int?
-  currentValueMinor Int?
-  // Status
-  status          String   @default("ACTIVE") // ACTIVE | INACTIVE | UNDER_MAINTENANCE | RETIRED | DISPOSED
-  condition       String   @default("GOOD") // EXCELLENT | GOOD | FAIR | POOR | BROKEN
-  // Maintenance
-  lastMaintenanceAt DateTime?
-  nextMaintenanceAt DateTime?
-  maintenanceIntervalDays Int? // e.g. 90 for quarterly
-  warrantyExpiry  DateTime?
-  // Metadata
-  metadataJson    String?  // free-form attributes (capacity, voltage, etc.)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  parent          Asset?   @relation("AssetHierarchy", fields: [parentAssetId], references: [id])
-  children        Asset[]  @relation("AssetHierarchy")
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  maintenanceRecords AssetMaintenance[]
-  workOrderLinks  WorkOrderAssetLink[]
-
-  @@unique([organizationId, code])
-  @@index([organizationId, assetType, status])
-  @@index([parentAssetId])
-  @@index([propertyId])
-}
-
-model AssetMaintenance {
-  id              String   @id @default(cuid())
-  assetId         String
-  maintenanceType String   @default("PREVENTIVE") // PREVENTIVE | CORRECTIVE | EMERGENCY | INSPECTION | CALIBRATION
-  scheduledAt     DateTime?
-  completedAt     DateTime?
-  performedBy     String?  // user id
-  description     String?
-  costMinor       Int      @default(0)
-  status          String   @default("SCHEDULED") // SCHEDULED | IN_PROGRESS | COMPLETED | CANCELLED
-  findings        String?
-  partsReplaced   String?  // JSON array
-  nextMaintenanceAt DateTime?
-  workOrderId     String?
-  createdAt       DateTime @default(now())
-
-  asset           Asset @relation(fields: [assetId], references: [id], onDelete: Cascade)
-
-  @@index([assetId, status])
-  @@index([scheduledAt])
-}
-
-// ----------------------------------------------------------------------------
-//  RULES ENGINE
-//  Configurable IF/THEN rules — operations teams change behavior without deployments.
-//
-//  Rule structure:
-//    Rule (name, scope, trigger, priority, isActive)
-//      → RuleCondition (field, operator, value) — all must match (AND logic)
-//      → RuleAction (actionType, config) — executed in order
-//      → RuleExecution (log of every time this rule fired)
-//
-//  Example: "If customer rated below 3 → create QA inspection → notify manager → offer discount"
+//  RULES ENGINE — declarative business behavior
 // ============================================================================
 
 model Rule {
@@ -3402,86 +484,338 @@ model Rule {
   organizationId  String
   name            String
   description     String?
-  // When does this rule trigger?
-  triggerEvent    String   // e.g. "booking.rated", "work_order.completed", "payment.failed"
+  triggerEvent    String   // event type that fires this rule
   triggerType     String   @default("EVENT") // EVENT | SCHEDULED | MANUAL
-  // Scope
-  scope           String   @default("ORGANIZATION") // ORGANIZATION | ENTERPRISE | DEPARTMENT
-  scopeId         String?  // org/enterprise/dept id
-  // Priority + activation
-  priority        Int      @default(100) // lower = higher priority
+  priority        Int      @default(100)
   isActive        Boolean  @default(true)
-  // Execution control
-  maxExecutionsPerDay Int  @default(0) // 0 = unlimited
-  cooldownMinutes Int      @default(0) // min time between executions for same entity
-  // Metadata
+  maxExecutionsPerDay Int  @default(0)
+  cooldownMinutes Int      @default(0)
+  // Conditions + Actions (stored as JSON for flexibility)
+  conditionsJson  String   // [{ field, operator, value, logicOperator }]
+  actionsJson     String   // [{ actionType, config, isAsync }]
+  scope           String   @default("ORGANIZATION")
+  scopeId         String?
+  protocolId      String?
   createdBy       String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  conditions      RuleCondition[]
-  actions         RuleAction[]
-  executions      RuleExecution[]
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-
+  executions      RuleExecution[]
   @@index([organizationId, isActive, priority])
   @@index([triggerEvent, isActive])
-}
-
-model RuleCondition {
-  id              String   @id @default(cuid())
-  ruleId          String
-  order           Int      @default(0)
-  field           String   // e.g. "rating.overall", "booking.totalMinor", "property.squareMeters"
-  operator        String   // EQ | NE | GT | GTE | LT | LTE | IN | NOT_IN | CONTAINS | STARTS_WITH | ENDS_WITH | BETWEEN
-  valueJson       String   // JSON-encoded value (string, number, array, etc.)
-  // Optional: AND/OR logic with next condition
-  logicOperator   String   @default("AND") // AND | OR
-
-  rule            Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-
-  @@index([ruleId, order])
-}
-
-model RuleAction {
-  id              String   @id @default(cuid())
-  ruleId          String
-  order           Int      @default(0)
-  actionType      String   // CREATE_WORK_ORDER | NOTIFY | SEND_EMAIL | SEND_SMS | APPLY_DISCOUNT |
-                           // ASSIGN_WORKER | CREATE_INSPECTION | UPDATE_FIELD | TRIGGER_WEBHOOK |
-                           // START_WORKFLOW | CREATE_TASK | SET_PRIORITY | ADD_TAG
-  name            String?
-  configJson      String   // action-specific config (target, template, amount, etc.)
-  isAsync         Boolean  @default(false)
-
-  rule            Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-
-  @@index([ruleId, order])
 }
 
 model RuleExecution {
   id              String   @id @default(cuid())
   ruleId          String
-  triggerEventId  String?  // AnalyticsEvent id that triggered
-  entityType      String?  // BOOKING | WORK_ORDER | CUSTOMER | etc.
+  triggerEventId  String?
+  entityType      String?
   entityId        String?
-  // Execution result
   status          String   @default("PENDING") // PENDING | RUNNING | COMPLETED | FAILED | SKIPPED
   conditionsMatched Boolean @default(false)
-  actionsExecutedJson String? // [{ actionId, actionType, success, result }]
+  actionsExecutedJson String?
   errorMessage    String?
   startedAt       DateTime @default(now())
   completedAt     DateTime?
   durationMs      Int?
-  // Metadata
-  triggeredBy     String?  // user id (for manual triggers)
+  triggeredBy     String?
   metadataJson    String?
 
   rule            Rule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-
-  @@index([ruleId, status, startedAt])
-  @@index([entityType, entityId])
+  @@index([ruleId, status])
 }
 
-// Add Organization relation for Enterprise + WorkOrder + Asset + Rule
-// (these are declared above but need back-relations on Organization)
+// ============================================================================
+//  POLICY ENGINE — access control + business policies
+// ============================================================================
+
+model Policy {
+  id              String   @id @default(cuid())
+  organizationId  String
+  key             String
+  name            String
+  description     String?
+  policyType      String   @default("ACCESS") // ACCESS | BUSINESS | COMPLIANCE | ECONOMIC
+  effect          String   @default("ALLOW")  // ALLOW | DENY | CONDITIONAL
+  conditionsJson  String?  // when this policy applies
+  actionsJson     String?  // what to do
+  priority        Int      @default(100)
+  isActive        Boolean  @default(true)
+  protocolId      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, key])
+}
+
+// ============================================================================
+//  SCHEDULING ENGINE
+// ============================================================================
+
+model Schedule {
+  id              String   @id @default(cuid())
+  organizationId  String
+  resourceId      String
+  scheduleType    String   @default("AVAILABILITY") // AVAILABILITY | BOOKING | MAINTENANCE | BREAK
+  dayOfWeek       Int?     // 0..6 for recurring
+  specificDate    DateTime? // for one-time
+  startTime       String   // "08:00"
+  endTime         String   // "17:00"
+  recurrenceJson  String?  // iCal-style recurrence rules
+  capacityJson    String?  // { maxConcurrent, units }
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  resource        Resource     @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  @@index([resourceId, specificDate])
+}
+
+// ============================================================================
+//  ROUTING ENGINE
+// ============================================================================
+
+model Route {
+  id              String   @id @default(cuid())
+  organizationId  String
+  code            String   @unique
+  resourceId      String?
+  executionPlanId String?
+  status          String   @default("PLANNED") // PLANNED | OPTIMIZED | ACTIVE | COMPLETED
+  totalDistanceKm Float?
+  totalDurationMin Int?
+  totalStops      Int       @default(0)
+  optimizedJson   String?   // optimization metadata (algorithm, alternatives, trade-offs)
+  // Decision provenance
+  alternativesJson String?  // other routes considered
+  tradeoffsJson   String?   // time vs cost vs quality trade-offs
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stops           RouteStop[]
+  @@index([organizationId, status])
+}
+
+model RouteStop {
+  id              String   @id @default(cuid())
+  routeId         String
+  order           Int
+  resourceId      String?
+  latitude        Float?
+  longitude       Float?
+  estimatedArrival DateTime?
+  actualArrival   DateTime?
+  durationMin     Int?
+  status          String   @default("PENDING") // PENDING | ARRIVED | COMPLETED | SKIPPED
+  metadataJson    String?
+
+  route           Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  resource        Resource? @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  @@index([routeId, order])
+}
+
+// ============================================================================
+//  MARKETPLACE ENGINE — generic capacity trading
+// ============================================================================
+
+model Marketplace {
+  id              String   @id @default(cuid())
+  organizationId  String
+  name            String
+  description     String?
+  marketplaceType String   @default("INTERNAL") // INTERNAL | EXTERNAL | HYBRID
+  optimizationGoals String[] @default(["QUALITY", "COST"]) // QUALITY | COST | LATENCY | UTILIZATION | COVERAGE
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  offers          Offer[]
+  @@index([organizationId, isActive])
+}
+
+model Offer {
+  id              String   @id @default(cuid())
+  organizationId  String
+  marketplaceId   String
+  providerId      String?  // resource or external provider
+  capabilityCode  String
+  capacityJson    String   // { units, startTime, endTime, location }
+  priceMinor      Int
+  currency        String   @default("USD")
+  qualityScore    Float?   // 0..100
+  confidenceScore Float?   // 0..1
+  status          String   @default("OPEN") // OPEN | RESERVED | FULFILLED | EXPIRED | CANCELLED
+  expiresAt       DateTime?
+  metadataJson    String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  marketplace     Marketplace @relation(fields: [marketplaceId], references: [id], onDelete: Cascade)
+  reservations    Reservation[]
+  @@index([marketplaceId, status])
+}
+
+model Reservation {
+  id              String   @id @default(cuid())
+  organizationId  String
+  offerId         String
+  resourceId      String?
+  demandId        String?
+  status          String   @default("PENDING") // PENDING | CONFIRMED | RELEASED | FULFILLED
+  quantity        Float    @default(1)
+  reservedAt      DateTime @default(now())
+  confirmedAt     DateTime?
+  releasedAt      DateTime?
+  metadataJson    String?
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  offer           Offer     @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  resource        Resource? @relation(fields: [resourceId], references: [id], onDelete: SetNull)
+  @@index([offerId, status])
+}
+
+// ============================================================================
+//  RECOMMENDATION ENGINE — immutable, evidence-based
+// ============================================================================
+
+model Recommendation {
+  id              String   @id @default(cuid())
+  organizationId  String
+  recommendationType String // DEMAND_FORECAST | RESOURCE_OPTIMIZATION | PRICING | SCHEDULING | QUALITY | RETENTION
+  entityType      String   // RESOURCE | DEMAND | INTENT | EXECUTION_PLAN
+  entityId        String?
+  title           String
+  description     String?
+  // Lifecycle
+  status          String   @default("DETECTED") // DETECTED | SCORED | SIMULATED | RECOMMENDED | ACCEPTED | IMPLEMENTED | OBSERVED | MEASURED | LEARNED
+  // Evidence
+  evidenceJson    String?  // supporting data
+  confidence      Float    @default(0.5) // 0..1
+  expectedImpactJson String? // { metric, delta, timeframe }
+  simulationJson  String?  // simulation results
+  explanation     String?  // human-readable explanation
+  // Resolution
+  acceptedAt      DateTime?
+  implementedAt   DateTime?
+  observedAt      DateTime?
+  actualImpactJson String?
+  accuracyScore   Float?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@index([organizationId, recommendationType, status])
+  @@index([organizationId, entityType, entityId])
+}
+
+// ============================================================================
+//  PROTOCOL SDK — protocol registration + installation
+// ============================================================================
+
+model ProtocolInstallation {
+  id              String   @id @default(cuid())
+  organizationId  String
+  protocolKey     String   // e.g. "eks-clean", "eks-laundry"
+  protocolVersion String
+  name            String
+  description     String?
+  // What the protocol registered
+  capabilitiesJson    String? // list of capability codes
+  intentDefinitionsJson String?
+  policiesJson    String?
+  rulesJson       String?
+  workflowsJson   String?
+  marketplaceJson String?
+  pricingJson     String?
+  dashboardsJson  String?
+  readModelsJson  String?
+  analyticsJson   String?
+  apiEndpointsJson String?
+  uiComponentsJson String?
+  compilerStagesJson String?
+  // Status
+  status          String   @default("INSTALLED") // INSTALLED | ACTIVE | SUSPENDED | UNINSTALLED
+  installedAt     DateTime @default(now())
+  activatedAt     DateTime?
+  configurationJson String?
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, protocolKey])
+  @@index([organizationId, status])
+}
+
+// ============================================================================
+//  EXTENSION SDK — extension registration
+// ============================================================================
+
+model ExtensionInstallation {
+  id              String   @id @default(cuid())
+  organizationId  String
+  extensionKey    String
+  extensionVersion String
+  name            String
+  description     String?
+  // What the extension registered
+  compilerStagesJson String?
+  dashboardsJson  String?
+  analyticsJson   String?
+  inspectorPanelsJson String?
+  recommendationAnalyzersJson String?
+  integrationsJson String?
+  widgetsJson     String?
+  apiEndpointsJson String?
+  uiComponentsJson String?
+  status          String   @default("INSTALLED")
+  installedAt     DateTime @default(now())
+  configurationJson String?
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  @@unique([organizationId, extensionKey])
+}
+
+// ============================================================================
+//  AUDIT LOG
+// ============================================================================
+
+model AuditLog {
+  id              String   @id @default(cuid())
+  userId          String?
+  organizationId  String?
+  action          String
+  resourceType    String?
+  resourceId      String?
+  beforeJson      String?
+  afterJson       String?
+  ipAddress       String?
+  userAgent       String?
+  outcome         String   @default("SUCCESS")
+  reason          String?
+  createdAt       DateTime @default(now())
+
+  user            User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  @@index([userId, createdAt])
+  @@index([action])
+}
+
+// ============================================================================
+//  NOTIFICATIONS
+// ============================================================================
+
+model Notification {
+  id              String   @id @default(cuid())
+  userId          String?
+  organizationId  String?
+  type            String
+  title           String
+  body            String?
+  dataJson        String?
+  readAt          DateTime?
+  createdAt       DateTime @default(now())
+  @@index([userId, readAt])
+}

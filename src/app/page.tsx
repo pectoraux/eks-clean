@@ -1,201 +1,464 @@
 "use client";
 
-import { useState } from "react";
-import dynamic from "next/dynamic";
+import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-
-// Allow up to 60 seconds for cold starts with Neon DB cross-region
-export const maxDuration = 60;
-import { useAuth } from "@/lib/client";
-import { AuthPanel } from "@/components/eks/auth-panel";
-import { RealtimeFeed } from "@/components/eks/realtime-feed";
-import { Sparkles, Activity, Calendar, Users, Wrench, Truck, Package, Repeat, Shield, BookOpen, LayoutDashboard, Briefcase, GraduationCap, Workflow, Heart, Brain, Database, BookMarked } from "lucide-react";
-
-// Lazy-load all heavy panels to reduce initial compile memory footprint.
-const AnalyticsOverview = dynamic(() => import("@/components/eks/analytics-overview").then(m => ({ default: m.AnalyticsOverview })));
-const NewBookingForm = dynamic(() => import("@/components/eks/new-booking-form").then(m => ({ default: m.NewBookingForm })));
-const BookingsPanel = dynamic(() => import("@/components/eks/bookings-panel").then(m => ({ default: m.BookingsPanel })));
-const WorkersPanel = dynamic(() => import("@/components/eks/workers-panel").then(m => ({ default: m.WorkersPanel })));
-const CustomersPanel = dynamic(() => import("@/components/eks/customers-panel").then(m => ({ default: m.CustomersPanel })));
-const ServicesPanel = dynamic(() => import("@/components/eks/services-panel").then(m => ({ default: m.ServicesPanel })));
-const DispatchPanel = dynamic(() => import("@/components/eks/dispatch-panel").then(m => ({ default: m.DispatchPanel })));
-const InventoryPanel = dynamic(() => import("@/components/eks/inventory-panel").then(m => ({ default: m.InventoryPanel })));
-const SubscriptionsPanel = dynamic(() => import("@/components/eks/subscriptions-panel").then(m => ({ default: m.SubscriptionsPanel })));
-const AuditPanel = dynamic(() => import("@/components/eks/audit-panel").then(m => ({ default: m.AuditPanel })));
-const ArchitecturePanel = dynamic(() => import("@/components/eks/architecture-panel").then(m => ({ default: m.ArchitecturePanel })));
-const CrmPanel = dynamic(() => import("@/components/eks/crm-panel").then(m => ({ default: m.CrmPanel })));
-const OperationsPanel = dynamic(() => import("@/components/eks/operations-panel").then(m => ({ default: m.OperationsPanel })));
-const LmsPanel = dynamic(() => import("@/components/eks/lms-panel").then(m => ({ default: m.LmsPanel })));
-const EnterprisePanel = dynamic(() => import("@/components/eks/enterprise-panel").then(m => ({ default: m.EnterprisePanel })));
-const WorkflowsPanel = dynamic(() => import("@/components/eks/workflows-panel").then(m => ({ default: m.WorkflowsPanel })));
-const KnowledgePanel = dynamic(() => import("@/components/eks/knowledge-panel").then(m => ({ default: m.KnowledgePanel })));
-const WorkforcePanel = dynamic(() => import("@/components/eks/workforce-panel").then(m => ({ default: m.WorkforcePanel })));
-const EventSourcedPanel = dynamic(() => import("@/components/eks/event-sourced-panel").then(m => ({ default: m.EventSourcedPanel })));
-const AiReadyPanel = dynamic(() => import("@/components/eks/ai-ready-panel").then(m => ({ default: m.AiReadyPanel })));
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { useToast } from "@/hooks/use-toast";
+import { api, useAuth } from "@/lib/client";
+import { Server, Workflow, Database, Brain, GitBranch, Boxes, Activity, Layers, Clock, Zap } from "lucide-react";
 
 export default function Home() {
-  const { session } = useAuth();
-  const [tab, setTab] = useState("dashboard");
+  const { session, setSession, clear } = useAuth();
+  const [tab, setTab] = useState("overview");
+  const { toast } = useToast();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [orgId, setOrgId] = useState<string | null>(null);
+
+  async function login(e: React.FormEvent) {
+    e.preventDefault();
+    try {
+      const r = await api<{ user: { id: string; email: string; fullName: string; organizationId: string | null }; session: { accessToken: string; refreshToken: string } }>("/api/opsos/auth/login", {
+        method: "POST", body: JSON.stringify({ email, password }),
+      });
+      setSession({ ...r.session, user: r.user });
+      if (r.user.organizationId) setOrgId(r.user.organizationId);
+      toast({ title: `Welcome, ${r.user.fullName}` });
+    } catch (e) {
+      toast({ title: "Login failed", description: e instanceof Error ? e.message : "", variant: "destructive" });
+    }
+  }
+
+  if (!session) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-10 h-10 rounded-lg bg-primary text-primary-foreground flex items-center justify-center font-bold">O</div>
+              <div>
+                <CardTitle className="text-xl">OpsOS</CardTitle>
+                <div className="text-xs text-muted-foreground">Operations Operating System</div>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={login} className="space-y-3">
+              <Input type="text" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
+              <Input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+              <Button type="submit" className="w-full">Sign In</Button>
+            </form>
+            <div className="mt-4 text-xs text-muted-foreground space-y-1">
+              <p>OpsOS is a domain-independent kernel.</p>
+              <p>Businesses are installed as Protocols via the Protocol SDK.</p>
+              <p>No business-specific concepts exist inside the kernel.</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      <Header session={session} />
+      <header className="border-b bg-card">
+        <div className="container mx-auto px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm">O</div>
+            <div>
+              <div className="font-semibold leading-none">OpsOS <span className="text-[10px] text-muted-foreground font-normal ml-1">Operations Operating System</span></div>
+              <div className="text-[10px] text-muted-foreground">Domain-Independent Kernel</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-sm">{session.user.fullName}</span>
+            <Button size="sm" variant="outline" onClick={() => clear()}>Sign out</Button>
+          </div>
+        </div>
+      </header>
+
       <main className="flex-1 container mx-auto px-4 py-6">
-        {!session ? (
-          <Landing onAuthed={() => {}} />
-        ) : (
-          <Tabs value={tab} onValueChange={setTab} className="w-full">
-            <TabsList className="flex flex-wrap h-auto gap-1 mb-4 bg-muted/50 p-1">
-              <TabsTrigger value="dashboard" className="gap-1.5"><LayoutDashboard className="w-3.5 h-3.5" /> Dashboard</TabsTrigger>
-              <TabsTrigger value="bookings" className="gap-1.5"><Calendar className="w-3.5 h-3.5" /> Bookings</TabsTrigger>
-              <TabsTrigger value="dispatch" className="gap-1.5"><Truck className="w-3.5 h-3.5" /> Dispatch</TabsTrigger>
-              <TabsTrigger value="workers" className="gap-1.5"><Wrench className="w-3.5 h-3.5" /> Workers</TabsTrigger>
-              <TabsTrigger value="customers" className="gap-1.5"><Users className="w-3.5 h-3.5" /> Customers</TabsTrigger>
-              <TabsTrigger value="services" className="gap-1.5"><Package className="w-3.5 h-3.5" /> Services</TabsTrigger>
-              <TabsTrigger value="subscriptions" className="gap-1.5"><Repeat className="w-3.5 h-3.5" /> Subscriptions</TabsTrigger>
-              <TabsTrigger value="inventory" className="gap-1.5"><Package className="w-3.5 h-3.5" /> Inventory</TabsTrigger>
-              <TabsTrigger value="crm" className="gap-1.5"><Heart className="w-3.5 h-3.5" /> CRM</TabsTrigger>
-              <TabsTrigger value="operations" className="gap-1.5"><Activity className="w-3.5 h-3.5" /> Operations</TabsTrigger>
-              <TabsTrigger value="lms" className="gap-1.5"><GraduationCap className="w-3.5 h-3.5" /> LMS</TabsTrigger>
-              <TabsTrigger value="enterprise" className="gap-1.5"><Briefcase className="w-3.5 h-3.5" /> Enterprise</TabsTrigger>
-              <TabsTrigger value="workflows" className="gap-1.5"><Workflow className="w-3.5 h-3.5" /> Workflows</TabsTrigger>
-              <TabsTrigger value="knowledge" className="gap-1.5"><BookMarked className="w-3.5 h-3.5" /> Knowledge</TabsTrigger>
-              <TabsTrigger value="workforce" className="gap-1.5"><Users className="w-3.5 h-3.5" /> Workforce</TabsTrigger>
-              <TabsTrigger value="eventsourced" className="gap-1.5"><Database className="w-3.5 h-3.5" /> Event Log</TabsTrigger>
-              <TabsTrigger value="ai" className="gap-1.5"><Brain className="w-3.5 h-3.5" /> AI-Ready</TabsTrigger>
-              <TabsTrigger value="audit" className="gap-1.5"><Shield className="w-3.5 h-3.5" /> Audit</TabsTrigger>
-              <TabsTrigger value="architecture" className="gap-1.5"><BookOpen className="w-3.5 h-3.5" /> Architecture</TabsTrigger>
-            </TabsList>
+        <Tabs value={tab} onValueChange={setTab} className="w-full">
+          <TabsList className="flex flex-wrap h-auto gap-1 mb-4 bg-muted/50 p-1">
+            <TabsTrigger value="overview" className="gap-1.5"><Server className="w-3.5 h-3.5" /> Overview</TabsTrigger>
+            <TabsTrigger value="demand" className="gap-1.5"><Activity className="w-3.5 h-3.5" /> Demand</TabsTrigger>
+            <TabsTrigger value="resources" className="gap-1.5"><Boxes className="w-3.5 h-3.5" /> Resources</TabsTrigger>
+            <TabsTrigger value="capabilities" className="gap-1.5"><Layers className="w-3.5 h-3.5" /> Capabilities</TabsTrigger>
+            <TabsTrigger value="events" className="gap-1.5"><Database className="w-3.5 h-3.5" /> Events</TabsTrigger>
+            <TabsTrigger value="rules" className="gap-1.5"><GitBranch className="w-3.5 h-3.5" /> Rules</TabsTrigger>
+            <TabsTrigger value="workflows" className="gap-1.5"><Workflow className="w-3.5 h-3.5" /> Workflows</TabsTrigger>
+            <TabsTrigger value="inspector" className="gap-1.5"><Zap className="w-3.5 h-3.5" /> Inspector</TabsTrigger>
+            <TabsTrigger value="protocols" className="gap-1.5"><Brain className="w-3.5 h-3.5" /> Protocols</TabsTrigger>
+          </TabsList>
 
-            <TabsContent value="dashboard" className="space-y-4">
-              <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
-                <div className="space-y-4">
-                  <AnalyticsOverview />
-                  {session.user.role === "CUSTOMER" && <NewBookingForm />}
-                </div>
-                <div className="space-y-4">
-                  <AuthPanel />
-                  <RealtimeFeed />
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="bookings"><BookingsPanel /></TabsContent>
-            <TabsContent value="dispatch"><DispatchPanel /></TabsContent>
-            <TabsContent value="workers"><WorkersPanel /></TabsContent>
-            <TabsContent value="customers"><CustomersPanel /></TabsContent>
-            <TabsContent value="services"><ServicesPanel /></TabsContent>
-            <TabsContent value="subscriptions"><SubscriptionsPanel /></TabsContent>
-            <TabsContent value="inventory"><InventoryPanel /></TabsContent>
-            <TabsContent value="crm"><CrmPanel /></TabsContent>
-            <TabsContent value="operations"><OperationsPanel /></TabsContent>
-            <TabsContent value="lms"><LmsPanel /></TabsContent>
-            <TabsContent value="enterprise"><EnterprisePanel /></TabsContent>
-            <TabsContent value="workflows"><WorkflowsPanel /></TabsContent>
-            <TabsContent value="knowledge"><KnowledgePanel /></TabsContent>
-            <TabsContent value="workforce"><WorkforcePanel /></TabsContent>
-            <TabsContent value="eventsourced"><EventSourcedPanel /></TabsContent>
-            <TabsContent value="ai"><AiReadyPanel /></TabsContent>
-            <TabsContent value="audit"><AuditPanel /></TabsContent>
-            <TabsContent value="architecture"><ArchitecturePanel /></TabsContent>
-          </Tabs>
-        )}
+          <TabsContent value="overview"><OverviewTab orgId={orgId} /></TabsContent>
+          <TabsContent value="demand"><DemandTab orgId={orgId} /></TabsContent>
+          <TabsContent value="resources"><ResourcesTab orgId={orgId} /></TabsContent>
+          <TabsContent value="capabilities"><CapabilitiesTab orgId={orgId} /></TabsContent>
+          <TabsContent value="events"><EventsTab orgId={orgId} /></TabsContent>
+          <TabsContent value="rules"><RulesTab orgId={orgId} /></TabsContent>
+          <TabsContent value="workflows"><WorkflowsTab orgId={orgId} /></TabsContent>
+          <TabsContent value="inspector"><InspectorTab orgId={orgId} /></TabsContent>
+          <TabsContent value="protocols"><ProtocolsTab orgId={orgId} /></TabsContent>
+        </Tabs>
       </main>
-      <Footer />
+      <footer className="border-t mt-auto">
+        <div className="container mx-auto px-4 py-3 text-xs text-muted-foreground flex justify-between">
+          <div>OpsOS v1.0 · Event-Sourced · CQRS · DDD · Deterministic Runtime</div>
+          <div>© 2026 OpsOS</div>
+        </div>
+      </footer>
     </div>
   );
 }
 
-function Header({ session }: { session: ReturnType<typeof useAuth.getState>["session"] }) {
-  return (
-    <header className="border-b bg-card">
-      <div className="container mx-auto px-4 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-md bg-primary text-primary-foreground flex items-center justify-center font-bold text-sm">E</div>
-          <div>
-            <div className="font-semibold leading-none">Eks-Clean <span className="text-[10px] text-muted-foreground font-normal ml-1">powered by Eks Operations Platform</span></div>
-            <div className="text-[10px] text-muted-foreground">Household Services ERP</div>
-          </div>
-        </div>
-        {session && (
-          <div className="text-sm">
-            <span className="text-muted-foreground hidden sm:inline">Signed in as </span>
-            <span className="font-medium">{session.user.fullName}</span>
-            <span className="ml-2 text-xs bg-muted px-1.5 py-0.5 rounded">{session.user.role}</span>
-          </div>
-        )}
-      </div>
-    </header>
-  );
-}
+// --- Overview Tab ---
+function OverviewTab({ orgId }: { orgId: string | null }) {
+  const [stats, setStats] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!orgId) return;
+    (async () => {
+      try {
+        const [demands, resources, capabilities, events, rules, plans] = await Promise.all([
+          api<{ items: unknown[] }>(`/api/opsos/demand/list?organizationId=${orgId}`),
+          api<{ items: unknown[] }>(`/api/opsos/resources/list?organizationId=${orgId}`),
+          api<{ items: unknown[] }>(`/api/opsos/capabilities/list?organizationId=${orgId}`),
+          api<{ items: unknown[] }>(`/api/opsos/events?organizationId=${orgId}&limit=1000`),
+          api<{ items: unknown[] }>(`/api/opsos/rules/list?organizationId=${orgId}`),
+          api<{ items: unknown[] }>(`/api/opsos/demand/list?organizationId=${orgId}`),
+        ]);
+        setStats({ demands: demands.items.length, resources: resources.items.length, capabilities: capabilities.items.length, events: events.items.length, rules: rules.items.length });
+      } catch {}
+    })();
+  }, [orgId]);
 
-function Footer() {
-  return (
-    <footer className="border-t mt-auto">
-      <div className="container mx-auto px-4 py-3 text-xs text-muted-foreground flex justify-between">
-        <div>Eks-Clean v2.0 ERP · Next.js · Prisma · Payswap · socket.io</div>
-        <div>© 2026 Eks-Clean</div>
-      </div>
-    </footer>
-  );
-}
+  const cards = [
+    { label: "Demands", value: stats.demands ?? 0, icon: Activity, color: "text-blue-600" },
+    { label: "Resources", value: stats.resources ?? 0, icon: Boxes, color: "text-green-600" },
+    { label: "Capabilities", value: stats.capabilities ?? 0, icon: Layers, color: "text-purple-600" },
+    { label: "Events (Store)", value: stats.events ?? 0, icon: Database, color: "text-amber-600" },
+    { label: "Rules", value: stats.rules ?? 0, icon: GitBranch, color: "text-red-600" },
+    { label: "Execution Plans", value: stats.demands ?? 0, icon: Workflow, color: "text-cyan-600" },
+  ];
 
-function Landing({ onAuthed }: { onAuthed: () => void }) {
   return (
-    <div className="grid lg:grid-cols-[1fr_360px] gap-6">
-      <div className="space-y-6">
-        <div className="space-y-3">
-          <div className="inline-flex items-center gap-1.5 text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">
-            <Sparkles className="w-3 h-3" /> Production-grade ERP · 26 modules · Event-driven
-          </div>
-          <h1 className="text-4xl font-bold tracking-tight">Eks-Clean</h1>
-          <p className="text-sm text-primary font-medium">powered by Eks Operations Platform</p>
-          <p className="text-lg text-muted-foreground max-w-2xl">
-            A multi-tenant Household Operations ERP — the first product built on the
-            Eks Operations Platform. Future products (Eks Laundry, Eks Waste, Eks Facilities,
-            Eks Property) will run on the same configurable workflow engine, geographic
-            intelligence, property digital twin, and dynamic pricing.
-          </p>
-        </div>
-        <div className="grid sm:grid-cols-2 gap-3">
-          <Feature title="Multi-tenant architecture" body="Organization → Branch → Area hierarchy. Eks-Clean is one tenant. Other service companies can subscribe. Org-scoped queries throughout." />
-          <Feature title="Configurable workflow engine v2" body="Workflow → Stage → Task → Checklist → RequiredSkill → RequiredProduct → ApprovalRule → QualityGate. Adding pest control = config only." />
-          <Feature title="Property digital twin" body="Property → Room → Surface → Appliance → Furniture → Photo → Timeline. Every cleaning becomes history. AI-ready recommendations." />
-          <Feature title="Dynamic pricing engine" body="10 transparent factors: base × distance × urgency × demand × scarcity × subscription × promo × holiday × night × large-property." />
-          <Feature title="Geographic intelligence" body="Country → Region → City → District → Neighborhood → Zone → ServiceArea. Travel polygons, traffic models, demand scores, pricing zones." />
-          <Feature title="Payment-gateway abstracted" body="Payswap is the only implementation. No business logic depends on it directly. Card data never touches this app." />
-          <Feature title="Configurable workflow engine" body="Versioned state machines with guards, triggers, and AI-ready action adapters (LLM, forecast, classify, webhook)." />
-          <Feature title="Audit-grade + RBAC" body="5 roles, 60+ permissions, JWT + refresh rotation, audit log on every state change, soft-deletes." />
-          <Feature title="Realtime operations" body="socket.io broadcasts booking transitions, dispatch offers, contract milestones, workflow transitions." />
-          <Feature title="Enterprise B2B + B2C" body="Per-customer SLAs, milestone tracking, billing schedules, contract performance metrics — alongside consumer subscriptions." />
-        </div>
-        <div className="rounded-lg border bg-muted/30 p-4 text-sm">
-          <div className="font-medium mb-1">Quick login (demo accounts)</div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-            <div><code>ekontetevi@gmail</code> — <strong>real admin</strong> (password: <code>Payswap123456</code>)</div>
-            <div><code>admin@eksclean.example</code> — demo admin (<code>EksClean123!</code>)</div>
-            <div><code>fm1@eksclean.example</code> — field manager</div>
-            <div><code>sales1@eksclean.example</code> — sales agent</div>
-            <div><code>adwoa@example.com</code> — customer</div>
-            <div><code>samuel.w@eksclean.example</code> — worker</div>
-          </div>
-          <div className="mt-2 text-xs text-muted-foreground">
-            Sign-up is waitlist-based: requests go to a queue, the admin approves each one before an account is created.
-          </div>
-        </div>
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        {cards.map((c) => (
+          <Card key={c.label}><CardContent className="p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs text-muted-foreground">{c.label}</div>
+                <div className="text-2xl font-bold">{c.value}</div>
+              </div>
+              <c.icon className={`w-8 h-8 ${c.color} opacity-20`} />
+            </div>
+          </CardContent></Card>
+        ))}
       </div>
-      <div className="lg:sticky lg:top-6 h-fit">
-        <AuthPanel />
-      </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">OpsOS Kernel — Bounded Contexts</CardTitle></CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+            {["Identity", "Organizations", "Authentication", "Authorization", "Runtime", "Intent Engine", "Execution Engine", "Workflow Engine", "Rules Engine", "Policy Engine", "Scheduling Engine", "Capability Registry", "Resource Engine", "Marketplace Engine", "Routing Engine", "Recommendation Engine", "Simulation Engine", "Projection Engine", "Event Store", "Read Model Engine", "Notification Engine", "Observability", "Inspector", "Extension Loader", "Configuration", "Feature Flags"].map((ctx) => (
+              <div key={ctx} className="flex items-center justify-between p-2 rounded border">
+                <span>{ctx}</span>
+                <Badge variant="outline" className="text-[10px] bg-green-50">Active</Badge>
+              </div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Universal Lifecycle</CardTitle></CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-center gap-1">
+            {["Demand", "Intent", "Validation", "Policy", "Capability", "Resource", "Scheduling", "Routing", "Execution Plan", "Execution", "Observation", "Measurement", "Learning", "Recommendations"].map((stage, i, arr) => (
+              <span key={stage} className="flex items-center gap-1">
+                <Badge variant={i < 2 ? "default" : "secondary"} className="text-xs">{stage}</Badge>
+                {i < arr.length - 1 && <span className="text-muted-foreground">→</span>}
+              </span>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-function Feature({ title, body }: { title: string; body: string }) {
+// --- Demand Tab ---
+function DemandTab({ orgId }: { orgId: string | null }) {
+  const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  useEffect(() => {
+    if (!orgId) return;
+    api<{ items: Array<Record<string, unknown>> }>(`/api/opsos/demand/list?organizationId=${orgId}`).then(r => setItems(r.items)).catch(() => {});
+  }, [orgId]);
   return (
-    <div className="border rounded-lg p-3">
-      <div className="font-medium text-sm">{title}</div>
-      <div className="text-xs text-muted-foreground mt-1">{body}</div>
+    <Card>
+      <CardHeader><CardTitle className="text-base">Demand Pipeline ({items.length})</CardTitle></CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-xs uppercase"><tr>
+              <th className="text-left p-3">Code</th><th className="text-left p-3">Source</th>
+              <th className="text-left p-3">Capability</th><th className="text-left p-3">Status</th>
+              <th className="text-left p-3">Priority</th><th className="text-left p-3">Created</th>
+            </tr></thead>
+            <tbody>
+              {items.map((d) => (
+                <tr key={d.id as string} className="border-b last:border-0 hover:bg-muted/30">
+                  <td className="p-3 font-mono text-xs">{d.code as string}</td>
+                  <td className="p-3">{d.source as string}</td>
+                  <td className="p-3 text-xs">{(d.capabilityCode as string) ?? "—"}</td>
+                  <td className="p-3"><Badge variant="secondary" className="text-xs">{d.status as string}</Badge></td>
+                  <td className="p-3"><Badge variant="outline" className="text-xs">{d.priority as string}</Badge></td>
+                  <td className="p-3 text-xs text-muted-foreground">{new Date(d.createdAt as string).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Resources Tab ---
+function ResourcesTab({ orgId }: { orgId: string | null }) {
+  const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  useEffect(() => {
+    if (!orgId) return;
+    api<{ items: Array<Record<string, unknown>> }>(`/api/opsos/resources/list?organizationId=${orgId}`).then(r => setItems(r.items)).catch(() => {});
+  }, [orgId]);
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Resources ({items.length})</CardTitle></CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-xs uppercase"><tr>
+              <th className="text-left p-3">Code</th><th className="text-left p-3">Name</th>
+              <th className="text-left p-3">Type</th><th className="text-left p-3">Status</th>
+            </tr></thead>
+            <tbody>
+              {items.map((r) => (
+                <tr key={r.id as string} className="border-b last:border-0 hover:bg-muted/30">
+                  <td className="p-3 font-mono text-xs">{r.code as string}</td>
+                  <td className="p-3">{r.name as string}</td>
+                  <td className="p-3"><Badge variant="outline" className="text-xs">{r.resourceType as string}</Badge></td>
+                  <td className="p-3"><Badge variant={r.status === "ACTIVE" ? "default" : "secondary"} className="text-xs">{r.status as string}</Badge></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Capabilities Tab ---
+function CapabilitiesTab({ orgId }: { orgId: string | null }) {
+  const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  useEffect(() => {
+    if (!orgId) return;
+    api<{ items: Array<Record<string, unknown>> }>(`/api/opsos/capabilities/list?organizationId=${orgId}`).then(r => setItems(r.items)).catch(() => {});
+  }, [orgId]);
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Capability Registry ({items.length})</CardTitle></CardHeader>
+      <CardContent className="p-0">
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-xs uppercase"><tr>
+              <th className="text-left p-3">Code</th><th className="text-left p-3">Name</th>
+              <th className="text-left p-3">Version</th><th className="text-left p-3">Protocol</th>
+            </tr></thead>
+            <tbody>
+              {items.map((c) => (
+                <tr key={c.id as string} className="border-b last:border-0 hover:bg-muted/30">
+                  <td className="p-3 font-mono text-xs">{c.code as string}</td>
+                  <td className="p-3">{c.name as string}</td>
+                  <td className="p-3 text-xs">{c.version as string}</td>
+                  <td className="p-3 text-xs">{(c.protocolId as string)?.slice(-8) ?? "kernel"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Events Tab (Event Store) ---
+function EventsTab({ orgId }: { orgId: string | null }) {
+  const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  useEffect(() => {
+    if (!orgId) return;
+    api<{ items: Array<Record<string, unknown>> }>(`/api/opsos/events?organizationId=${orgId}&limit=50`).then(r => setItems(r.items)).catch(() => {});
+  }, [orgId]);
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Event Store ({items.length})</CardTitle></CardHeader>
+      <CardContent className="p-0">
+        <div className="max-h-[600px] overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-xs uppercase sticky top-0"><tr>
+              <th className="text-left p-3">Aggregate</th><th className="text-left p-3">Event</th>
+              <th className="text-right p-3">Ver</th><th className="text-left p-3">Occurred</th>
+            </tr></thead>
+            <tbody>
+              {items.map((e) => (
+                <tr key={e.id as string} className="border-b last:border-0 hover:bg-muted/30">
+                  <td className="p-3 font-mono text-xs">{e.aggregateType as string}:{(e.aggregateId as string)?.slice(-6)}</td>
+                  <td className="p-3 font-mono text-xs">{e.eventType as string}</td>
+                  <td className="p-3 text-right">{e.version as number}</td>
+                  <td className="p-3 text-xs text-muted-foreground">{new Date(e.occurredAt as string).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Rules Tab ---
+function RulesTab({ orgId }: { orgId: string | null }) {
+  const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  useEffect(() => {
+    if (!orgId) return;
+    api<{ items: Array<Record<string, unknown>> }>(`/api/opsos/rules/list?organizationId=${orgId}`).then(r => setItems(r.items)).catch(() => {});
+  }, [orgId]);
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Rules Engine ({items.length})</CardTitle></CardHeader>
+      <CardContent className="p-0">
+        <div className="divide-y">
+          {items.map((r) => (
+            <div key={r.id as string} className="p-3">
+              <div className="flex justify-between">
+                <span className="font-medium text-sm">{r.name as string}</span>
+                <Badge variant={r.isActive ? "default" : "secondary"} className="text-xs">{r.isActive ? "Active" : "Inactive"}</Badge>
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">Trigger: {r.triggerEvent as string} · Priority: {r.priority as number}</div>
+            </div>
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Workflows Tab ---
+function WorkflowsTab({ orgId }: { orgId: string | null }) {
+  return (
+    <Card>
+      <CardHeader><CardTitle className="text-base">Workflow Engine</CardTitle></CardHeader>
+      <CardContent className="text-sm text-muted-foreground">
+        <p>Workflows are entirely configurable. No workflow is hardcoded.</p>
+        <p className="mt-2">Workflow → Stages → Tasks → Checklists → Approvals → Quality Gates → Completion Rules</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+// --- Inspector Tab ---
+function InspectorTab({ orgId }: { orgId: string | null }) {
+  const [graph, setGraph] = useState<{ nodes: Array<{ id: string; label: string; type: string; status?: string }>; edges: Array<{ from: string; to: string; label?: string }> } | null>(null);
+  const [stats, setStats] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!orgId) return;
+    api<{ graph: { nodes: Array<{ id: string; label: string; type: string; status?: string }>; edges: Array<{ from: string; to: string; label?: string }> }; stats: Record<string, number> }>(`/api/opsos/inspector/graph?organizationId=${orgId}`).then(r => { setGraph(r.graph); setStats(r.stats); }).catch(() => {});
+  }, [orgId]);
+
+  const typeColors: Record<string, string> = {
+    DEMAND: "bg-blue-100 text-blue-800",
+    INTENT: "bg-purple-100 text-purple-800",
+    EXECUTION_PLAN: "bg-green-100 text-green-800",
+    EVENT: "bg-amber-100 text-amber-800",
+    RESOURCE: "bg-cyan-100 text-cyan-800",
+    CAPABILITY: "bg-pink-100 text-pink-800",
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {Object.entries(stats).map(([k, v]) => (
+          <Card key={k}><CardContent className="p-3">
+            <div className="text-xs text-muted-foreground capitalize">{k}</div>
+            <div className="text-xl font-bold">{v}</div>
+          </CardContent></Card>
+        ))}
+      </div>
+      <Card>
+        <CardHeader><CardTitle className="text-base">Execution Graph</CardTitle></CardHeader>
+        <CardContent>
+          {graph && graph.nodes.length > 0 ? (
+            <div className="space-y-1 max-h-[500px] overflow-y-auto">
+              {graph.nodes.map((n) => (
+                <div key={n.id} className="flex items-center gap-2 p-2 border rounded">
+                  <span className={`inline-block w-2 h-2 rounded-full ${typeColors[n.type] ? typeColors[n.type].split(" ")[0].replace("bg-", "bg-") : "bg-gray-300"}`} />
+                  <span className={`text-xs px-2 py-0.5 rounded ${typeColors[n.type] ?? "bg-gray-100"}`}>{n.type}</span>
+                  <span className="text-sm font-mono">{n.label}</span>
+                  {n.status && <Badge variant="outline" className="text-xs ml-auto">{n.status}</Badge>}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground text-center py-8">No execution graph data yet.</div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+// --- Protocols Tab ---
+function ProtocolsTab({ orgId }: { orgId: string | null }) {
+  const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
+  useEffect(() => {
+    if (!orgId) return;
+    api<{ items: Array<Record<string, unknown>> }>(`/api/opsos/protocols/list?organizationId=${orgId}`).then(r => setItems(r.items)).catch(() => {});
+  }, [orgId]);
+  return (
+    <div className="space-y-4">
+      <Card>
+        <CardHeader><CardTitle className="text-base">Protocol SDK</CardTitle></CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          <p>Protocols are dynamically discovered. Kernel code never changes.</p>
+          <p className="mt-2">Every protocol implements:</p>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-1 mt-2 text-xs font-mono">
+            {["registerCapabilities()", "registerIntentDefinitions()", "registerPolicies()", "registerRules()", "registerCompilerStages()", "registerWorkflows()", "registerMarketplace()", "registerPricing()", "registerDashboards()", "registerReadModels()", "registerAnalytics()", "registerApi()", "registerUi()"].map(m => (
+              <div key={m} className="p-1 rounded bg-muted/50">{m}</div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader><CardTitle className="text-base">Installed Protocols ({items.length})</CardTitle></CardHeader>
+        <CardContent className="p-0">
+          <div className="divide-y">
+            {items.map((p) => (
+              <div key={p.id as string} className="p-3 flex justify-between items-center">
+                <div>
+                  <div className="font-medium text-sm">{p.name as string}</div>
+                  <div className="text-xs text-muted-foreground font-mono">{p.protocolKey as string} v{p.protocolVersion as string}</div>
+                </div>
+                <Badge variant={p.status === "ACTIVE" ? "default" : "secondary"} className="text-xs">{p.status as string}</Badge>
+              </div>
+            ))}
+            {items.length === 0 && <div className="p-6 text-center text-sm text-muted-foreground">No protocols installed yet. Install a protocol (e.g. Eks-Clean) to add business semantics.</div>}
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
