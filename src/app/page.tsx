@@ -424,10 +424,34 @@ function InspectorTab({ orgId }: { orgId: string | null }) {
 // --- Protocols Tab ---
 function ProtocolsTab({ orgId }: { orgId: string | null }) {
   const [items, setItems] = useState<Array<Record<string, unknown>>>([]);
-  useEffect(() => {
+  const [installing, setInstalling] = useState(false);
+  const [installResult, setInstallResult] = useState<Record<string, unknown> | null>(null);
+  const { toast } = useToast();
+
+  async function loadProtocols() {
     if (!orgId) return;
-    api<{ items: Array<Record<string, unknown>> }>(`/api/opsos/protocols/list?organizationId=${orgId}`).then(r => setItems(r.items)).catch(() => {});
-  }, [orgId]);
+    try { const r = await api<{ items: Array<Record<string, unknown>> }>(`/api/opsos/protocols/list?organizationId=${orgId}`); setItems(r.items); } catch {}
+  }
+
+  useEffect(() => { loadProtocols(); }, [orgId]);
+
+  async function installEksClean() {
+    if (!orgId) return;
+    setInstalling(true);
+    try {
+      const r = await api<{ installed: boolean; registered: Record<string, number> }>(`/api/protocols/eks-clean/install`, {
+        method: "POST", body: JSON.stringify({ organizationId: orgId }),
+      });
+      setInstallResult(r);
+      toast({ title: "Eks-Clean protocol installed!", description: `${r.registered.capabilities} capabilities, ${r.registered.workflows} workflows, ${r.registered.rules} rules` });
+      loadProtocols();
+    } catch (e) {
+      toast({ title: "Installation failed", description: e instanceof Error ? e.message : "", variant: "destructive" });
+    } finally {
+      setInstalling(false);
+    }
+  }
+
   return (
     <div className="space-y-4">
       <Card>
@@ -442,6 +466,44 @@ function ProtocolsTab({ orgId }: { orgId: string | null }) {
           </div>
         </CardContent>
       </Card>
+
+      {items.length === 0 && (
+        <Card className="border-primary/30 bg-primary/5">
+          <CardHeader><CardTitle className="text-base">Install Eks-Clean Protocol</CardTitle></CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Eks-Clean is the first OpsOS protocol. It registers cleaning capabilities
+              (residential, commercial, deep, move-in/out, laundry, carpet, upholstery, window, waste),
+              surface intelligence, chemical intelligence, property digital twins, dynamic pricing,
+              route optimization, enterprise customers, and AI-ready event collection —
+              all through the Protocol SDK, without modifying the kernel.
+            </p>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+              <div className="p-2 border rounded"><strong>11</strong> Capabilities</div>
+              <div className="p-2 border rounded"><strong>10</strong> Intent Definitions</div>
+              <div className="p-2 border rounded"><strong>4</strong> Policies</div>
+              <div className="p-2 border rounded"><strong>5</strong> Rules</div>
+              <div className="p-2 border rounded"><strong>4</strong> Workflows</div>
+              <div className="p-2 border rounded"><strong>5</strong> Pricing Models</div>
+              <div className="p-2 border rounded"><strong>2</strong> Dashboards</div>
+              <div className="p-2 border rounded"><strong>6</strong> Read Models</div>
+              <div className="p-2 border rounded"><strong>6</strong> Analytics Queries</div>
+              <div className="p-2 border rounded"><strong>8</strong> API Endpoints</div>
+              <div className="p-2 border rounded"><strong>8</strong> UI Components</div>
+              <div className="p-2 border rounded"><strong>4</strong> Compiler Stages</div>
+            </div>
+            <Button onClick={installEksClean} disabled={installing} className="w-full">
+              {installing ? "Installing..." : "Install Eks-Clean Protocol"}
+            </Button>
+            {installResult && (
+              <div className="text-xs text-green-600 mt-2">
+                ✓ Installed: {installResult.registered?.capabilities} capabilities, {installResult.registered?.workflows} workflows, {installResult.registered?.rules} rules, {installResult.registered?.policies} policies
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Card>
         <CardHeader><CardTitle className="text-base">Installed Protocols ({items.length})</CardTitle></CardHeader>
         <CardContent className="p-0">
